@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ESNext"],
+    "types": ["node"],
+    "allowJs": true,
+    // Cette option est importante pour les références de projet
+    "composite": true
+  },
+  "include": [".", "../shared"]
+}

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "types": ["vite/client", "react", "react-dom"],
+    "isolatedModules": true,
+    // Cette option est importante pour les références de projet
+    "composite": true
+  },
+  "include": [".", "../shared"]
+}
