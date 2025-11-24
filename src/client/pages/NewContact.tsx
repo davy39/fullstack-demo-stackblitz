@@ -1,8 +1,14 @@
 /**
  * Page de création d'un nouveau contact.
  *
- * Utilise la bibliothèque Formik pour la gestion d'état du formulaire
- * et Yup pour la validation côté client (en miroir de Zod côté serveur).
+ * VALIDATION PARTAGÉE :
+ * Ce formulaire utilise Formik pour la gestion d'état et Zod pour la validation.
+ * Au lieu de redéfinir les règles de validation ici, nous importons le schéma
+ * `CreateContactSchema` depuis le dossier `shared`.
+ *
+ * Note sur MUI Grid v2 :
+ * La prop `item` est obsolète. Nous utilisons `Grid2` avec la prop `size`
+ * pour définir la largeur des colonnes.
  *
  * @module NewContactPage
  */
@@ -12,67 +18,93 @@ import {
   TextField,
   Button,
   Typography,
-  Grid,
   Box,
   Container,
   Card,
   CardContent,
+  Grid,
 } from '@mui/material';
 import { Formik, Field, ErrorMessage, FormikHelpers } from 'formik';
-import * as Yup from 'yup';
 import axios from 'axios';
 import { toast } from 'react-toastify';
+import { useNavigate } from 'react-router-dom';
 
 // Icônes
 import { AccountCircle, Email, Person, PersonAdd, SaveAlt } from '@mui/icons-material';
 
-// Types partagés
-import type { CreateContactDTO, ApiResponse, Contact } from '../../shared/index';
+// --- IMPORT DU NOYAU PARTAGÉ ---
+import {
+  type CreateContactDTO,
+  type ApiResponse,
+  type Contact,
+  CreateContactSchema, // Le schéma Zod partagé
+} from '../../shared/index';
 
-// Schéma de validation client (Yup)
-// Il doit être cohérent avec le schéma Zod du backend
-const ContactSchema = Yup.object().shape({
-  firstName: Yup.string().min(2, 'Trop court').required('Le prénom est requis'),
-  lastName: Yup.string().min(2, 'Trop court').required('Le nom est requis'),
-  email: Yup.string().email("Format d'email invalide").required("L'email est requis"),
-});
+/**
+ * Fonction utilitaire pour adapter Zod à Formik.
+ * Formik attend une fonction `validate` qui retourne un objet d'erreurs plat.
+ * Zod retourne un résultat structuré qu'il faut convertir.
+ */
+const validateWithZod = (values: CreateContactDTO) => {
+  const result = CreateContactSchema.safeParse(values);
+
+  if (!result.success) {
+    // Transformation des erreurs Zod en format simple { champ: "message" }
+    // flatten().fieldErrors retourne { field: ["Error 1", "Error 2"] }
+    const fieldErrors = result.error.flatten().fieldErrors;
+    const formikErrors: Record<string, string> = {};
+
+    Object.entries(fieldErrors).forEach(([key, messages]) => {
+      if (messages && messages.length > 0) {
+        formikErrors[key] = messages[0];
+      }
+    });
+
+    return formikErrors;
+  }
+
+  return {}; // Aucune erreur
+};
 
 const NewContact: React.FC = () => {
-  // Valeurs initiales du formulaire typées selon le DTO
+  const navigate = useNavigate();
+
+  // Valeurs initiales strictement typées selon le DTO partagé
   const initialValues: CreateContactDTO = {
     firstName: '',
     lastName: '',
     email: '',
-    // phone, company, notes sont optionnels dans le DTO, on peut les omettre ici
+    // Les champs optionnels ne sont pas obligatoires ici, Zod gérera leur absence
   };
 
   /**
-   * Gestionnaire de soumission du formulaire.
-   *
-   * @param values - Les données du formulaire (automatiquement typées CreateContactDTO)
-   * @param actions - Helpers Formik (pour reset le form ou arrêter le loading)
+   * Soumission du formulaire.
    */
   const handleContactSubmit = async (
     values: CreateContactDTO,
-    { resetForm, setSubmitting }: FormikHelpers<CreateContactDTO>
+    { setSubmitting, setErrors }: FormikHelpers<CreateContactDTO>
   ) => {
     try {
-      // Envoi de la requête POST sur la route racine (REST standard)
+      // Envoi des données au backend
       const response = await axios.post<ApiResponse<Contact>>('/api/v1/contact', values);
 
       if (response.data.success) {
         toast.success('Contact créé avec succès !');
-        resetForm();
-        // Optionnel : Rediriger vers la liste ou le détail après création
-        // navigate("/contacts");
+        navigate('/contacts');
       }
     } catch (err: unknown) {
       console.error('Erreur création contact:', err);
 
-      // Gestion fine des erreurs (ex: email déjà pris)
       if (axios.isAxiosError(err) && err.response) {
         const apiError = err.response.data as ApiResponse;
-        toast.error(apiError.message || 'Erreur lors de la création');
+
+        // Gestion spécifique des erreurs de validation serveur (ex: unicité email)
+        // Si le serveur renvoie une 409 Conflict, on l'affiche sur le champ email
+        if (err.response.status === 409) {
+          setErrors({ email: apiError.message });
+        } else {
+          toast.error(apiError.message || 'Erreur lors de la création');
+        }
       } else {
         toast.error('Une erreur inattendue est survenue');
       }
@@ -81,10 +113,7 @@ const NewContact: React.FC = () => {
     }
   };
 
-  /**
-   * Composant utilitaire pour afficher les erreurs de validation.
-   * Remplace l'ancien style 'makeStyles'.
-   */
+  // Composant helper pour afficher les erreurs de champ
   const FormError = ({ name }: { name: string }) => (
     <ErrorMessage name={name}>
       {(msg) => (
@@ -109,19 +138,20 @@ const NewContact: React.FC = () => {
 
           <Formik
             initialValues={initialValues}
-            validationSchema={ContactSchema}
+            // Validation via le schéma Zod partagé
+            validate={validateWithZod}
             onSubmit={handleContactSubmit}
           >
             {({ handleSubmit, isSubmitting }) => (
               <form onSubmit={handleSubmit}>
+                {/* Grid Container */}
                 <Grid container spacing={3}>
-                  {/* Champ Prénom */}
-                  <Grid item xs={12} sm={6}>
+                  {/* Champ Prénom : size={{ xs: 12, sm: 6 }} remplace xs={12} sm={6} */}
+                  <Grid size={{ xs: 12, sm: 6 }}>
                     <Field
                       name="firstName"
                       as={TextField}
                       label="Prénom"
-                      required
                       fullWidth
                       variant="outlined"
                       InputProps={{
@@ -132,12 +162,11 @@ const NewContact: React.FC = () => {
                   </Grid>
 
                   {/* Champ Nom */}
-                  <Grid item xs={12} sm={6}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
                     <Field
                       name="lastName"
                       as={TextField}
                       label="Nom"
-                      required
                       fullWidth
                       variant="outlined"
                       InputProps={{
@@ -147,13 +176,12 @@ const NewContact: React.FC = () => {
                     <FormError name="lastName" />
                   </Grid>
 
-                  {/* Champ Email */}
-                  <Grid item xs={12}>
+                  {/* Champ Email (Pleine largeur) */}
+                  <Grid size={{ xs: 12 }}>
                     <Field
                       name="email"
                       as={TextField}
                       label="Adresse Email"
-                      required
                       fullWidth
                       variant="outlined"
                       type="email"
@@ -164,8 +192,8 @@ const NewContact: React.FC = () => {
                     <FormError name="email" />
                   </Grid>
 
-                  {/* Bouton de Soumission */}
-                  <Grid item xs={12}>
+                  {/* Bouton d'action */}
+                  <Grid size={{ xs: 12 }}>
                     <Button
                       variant="contained"
                       color="primary"

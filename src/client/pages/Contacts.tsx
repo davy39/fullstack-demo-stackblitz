@@ -1,8 +1,8 @@
 /**
- * Page de gestion des Contacts.
+ * Page de liste des Contacts.
  *
- * Cette page illustre l'utilisation des types partagés (Shared Types)
- * pour garantir que le Frontend consomme exactement ce que le Backend produit.
+ * Affiche un tableau de tous les contacts enregistrés avec des options pour
+ * voir les détails ou supprimer un enregistrement.
  *
  * @module ContactsPage
  */
@@ -12,7 +12,7 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 
-// Composants UI (Material Design)
+// Composants UI
 import {
   Box,
   Button,
@@ -43,39 +43,35 @@ import CallToAction from '../components/CallToAction';
 import ConfirmationDialog from '../components/ConfirmationDialog';
 import AppLoading from '../components/AppLoading';
 
-// --- IMPORT DES TYPES PARTAGÉS ---
-// On utilise 'import type' pour que Vite n'inclue pas de code JS inutile
+// Types partagés
 import type { Contact, ApiResponse } from '../../shared/index';
 
 const Contacts: React.FC = () => {
-  // Le state est typé avec l'interface Prisma générée !
+  // Le tableau de contacts est strictement typé.
+  // Impossible d'ajouter un objet qui ne respecte pas l'interface 'Contact'.
   const [contacts, setContacts] = useState<Contact[]>([]);
 
-  // Gestion de la modale de suppression
+  // États pour la gestion de la modale de suppression et du chargement
   const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
   const [contactToDelete, setContactToDelete] = useState<number | null>(null);
-
-  // État de chargement
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   /**
-   * Chargement des données depuis l'API.
+   * Charge les contacts depuis le backend.
    */
   useEffect(() => {
     const fetchContacts = async () => {
       try {
         setIsLoading(true);
 
-        // TYPAGE FORT AXIOS :
-        // On indique explicitement que l'API renvoie une ApiResponse contenant un tableau de Contact.
+        // La requête attend une réponse standardisée contenant un tableau de contacts.
         const response = await axios.get<ApiResponse<Contact[]>>('/api/v1/contact/list');
 
-        // TypeScript valide ici que 'response.data.data' est bien un Contact[]
         if (response.data.success && response.data.data) {
           setContacts(response.data.data);
         }
       } catch (err) {
-        console.error('Erreur lors du chargement des contacts:', err);
+        console.error('Erreur chargement contacts:', err);
         toast.error('Impossible de récupérer la liste des contacts');
       } finally {
         setIsLoading(false);
@@ -86,7 +82,7 @@ const Contacts: React.FC = () => {
   }, []);
 
   /**
-   * Ouvre la modale de confirmation.
+   * Prépare la suppression en ouvrant la boîte de dialogue.
    */
   const handleDeleteClick = (id: number) => {
     setContactToDelete(id);
@@ -94,15 +90,17 @@ const Contacts: React.FC = () => {
   };
 
   /**
-   * Exécute la suppression.
+   * Exécute la suppression après confirmation de l'utilisateur.
    */
   const confirmDeleteContact = async () => {
     if (contactToDelete === null) return;
 
     try {
+      // Appel DELETE. Le backend renverra null dans 'data' en cas de succès.
       await axios.delete<ApiResponse>(`/api/v1/contact/${contactToDelete}`);
 
-      // Mise à jour locale de la liste (Optimistic UI ou post-validation)
+      // Mise à jour de l'interface (Optimistic UI ou re-fetch)
+      // Ici, on filtre localement pour éviter un nouvel appel réseau.
       setContacts((prevContacts) =>
         prevContacts.filter((contact) => contact.id !== contactToDelete)
       );
@@ -110,18 +108,17 @@ const Contacts: React.FC = () => {
       setDeleteDialogOpen(false);
       toast.success('Contact supprimé avec succès');
     } catch (err) {
-      console.error('Erreur lors de la suppression:', err);
+      console.error('Erreur suppression:', err);
       toast.error('Une erreur est survenue lors de la suppression');
     }
   };
 
   return (
     <Container maxWidth="xl" component="main" sx={{ py: 4 }}>
-      {/* 1. État de Chargement */}
       {isLoading ? (
         <AppLoading />
       ) : contacts.length === 0 ? (
-        /* 2. État Vide (Empty State) */
+        /* Affichage d'un état vide ("Empty State") si aucun contact n'existe */
         <Card elevation={2} sx={{ borderRadius: 2, py: 8 }}>
           <CallToAction
             heroIcon={Group}
@@ -132,7 +129,7 @@ const Contacts: React.FC = () => {
           />
         </Card>
       ) : (
-        /* 3. Liste des Données */
+        /* Affichage du tableau de données */
         <Box>
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
             <Box display="flex" alignItems="center">
@@ -177,6 +174,7 @@ const Contacts: React.FC = () => {
                     <TableCell>{contact.email}</TableCell>
                     <TableCell align="center">
                       <Box display="flex" justifyContent="center" gap={1}>
+                        {/* Lien vers la page de détail */}
                         <IconButton
                           component={Link}
                           to={`/contact/${contact.id}`}
@@ -186,6 +184,7 @@ const Contacts: React.FC = () => {
                         >
                           <VisibilityIcon />
                         </IconButton>
+                        {/* Bouton de suppression */}
                         <IconButton
                           onClick={() => handleDeleteClick(contact.id)}
                           color="error"
@@ -204,7 +203,7 @@ const Contacts: React.FC = () => {
         </Box>
       )}
 
-      {/* Modale de Confirmation */}
+      {/* Modale de confirmation pour éviter les suppressions accidentelles */}
       <ConfirmationDialog
         open={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}

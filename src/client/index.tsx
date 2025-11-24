@@ -13,7 +13,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
-import { ThemeProvider } from '@mui/material/styles';
 import { ToastContainer } from 'react-toastify';
 
 // Import des styles globaux et CSS tiers
@@ -21,7 +20,7 @@ import 'react-toastify/dist/ReactToastify.css';
 import './app.css';
 
 // Import du thème (Note : pas d'extension .js/.ts nécessaire avec Vite)
-import theme from './theme/theme';
+import { AppThemeProvider } from './theme/AppThemeProvider';
 
 // Import des composants et pages
 import Header from './components/Header';
@@ -46,7 +45,7 @@ if (rootElement) {
       <ToastContainer position="bottom-right" theme="dark" />
 
       {/* Fournisseur de thème Material UI */}
-      <ThemeProvider theme={theme}>
+      <AppThemeProvider>
         {/* Gestionnaire de routing */}
         <BrowserRouter>
           <Header />
@@ -70,7 +69,7 @@ if (rootElement) {
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
-      </ThemeProvider>
+      </AppThemeProvider>
     </React.Fragment>
   );
 } else {

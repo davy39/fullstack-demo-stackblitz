@@ -1,23 +1,23 @@
 /**
  * Routeur de gestion des Projets.
  *
- * Ce module expose l'API RESTful pour la gestion complète du cycle de vie des projets
- * (CRUD) ainsi que la gestion des relations avec les membres (Contacts).
+ * Ce module expose l'API RESTful pour la gestion des projets et des membres.
  *
- * REFACTORING EXPRESS 5 :
- * Simplification de la gestion d'erreurs grâce au support natif des Promesses.
+ * TRANSITION DRIZZLE :
+ * - Suppression des types d'erreurs Prisma.
+ * - Utilisation de codes d'erreurs SQLite natifs pour gérer les contraintes
+ *   (Unicité des membres, Clés étrangères invalides).
  *
  * @module ProjectRoutes
  */
 
-import { Prisma } from '@prisma/client';
 import { Router, Request, Response } from 'express';
 import { successResponse, errorResponse } from '../../utils/response.js';
 import * as projectService from '../../services/project.service.js';
 import {
   validate,
   IdParamSchema,
-  ProjectSchema,
+  projectSchemas,
   AddMemberSchema,
   RemoveMemberParamsSchema,
   CreateProjectDTO,
@@ -26,32 +26,27 @@ import {
 
 const router = Router();
 
+// Interface minimale pour typer les erreurs renvoyées par better-sqlite3
+interface SqliteError extends Error {
+  code: string;
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                Lectures (GET)                              */
 /* -------------------------------------------------------------------------- */
 
-/**
- * GET /api/v1/project/list
- * Récupère la liste de tous les projets.
- */
 router.get('/list', async (req: Request, res: Response) => {
   const { status } = req.query;
-  const filters: any = {};
+  const filters: { status?: string } = {};
 
-  // Application du filtre si présent
   if (status && typeof status === 'string') {
     filters.status = status;
   }
 
-  // Express 5 gère l'erreur si findAll échoue
   const projects = await projectService.findAll(filters);
   res.status(200).json(successResponse(projects, 'Projets récupérés avec succès'));
 });
 
-/**
- * GET /api/v1/project/:id
- * Récupère les détails complets d'un projet par son ID.
- */
 router.get('/:id', validate(IdParamSchema, 'params'), async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   const project = await projectService.findById(id);
@@ -67,27 +62,16 @@ router.get('/:id', validate(IdParamSchema, 'params'), async (req: Request, res: 
 /*                                Routes (Écriture)                           */
 /* -------------------------------------------------------------------------- */
 
-/**
- * POST /api/v1/project
- * Crée un nouveau projet.
- */
-router.post('/', validate(ProjectSchema), async (req: Request, res: Response) => {
+router.post('/', validate(projectSchemas.create), async (req: Request, res: Response) => {
   const projectData = req.body as CreateProjectDTO;
-
-  // Pas de try/catch spécifique ici car pas de contrainte unique susceptible d'échouer
-  // (sauf erreur interne gérée par Express 5)
   const project = await projectService.create(projectData);
   res.status(201).json(successResponse(project, 'Projet créé avec succès'));
 });
 
-/**
- * PUT /api/v1/project/:id
- * Met à jour partiellement ou totalement un projet existant.
- */
 router.put(
   '/:id',
   validate(IdParamSchema, 'params'),
-  validate(ProjectSchema.partial()), // Autorise la mise à jour partielle
+  validate(projectSchemas.update),
   async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const updateData = req.body;
@@ -102,10 +86,6 @@ router.put(
   }
 );
 
-/**
- * DELETE /api/v1/project/:id
- * Supprime un projet.
- */
 router.delete('/:id', validate(IdParamSchema, 'params'), async (req: Request, res: Response) => {
   const id = Number(req.params.id);
 
@@ -122,10 +102,6 @@ router.delete('/:id', validate(IdParamSchema, 'params'), async (req: Request, re
 /*                        Gestion des Membres (Sous-ressources)               */
 /* -------------------------------------------------------------------------- */
 
-/**
- * POST /api/v1/project/:id/members
- * Ajoute un contact en tant que membre du projet.
- */
 router.post(
   '/:id/members',
   validate(IdParamSchema, 'params'),
@@ -138,43 +114,33 @@ router.post(
       const member = await projectService.addMember(projectId, memberData);
       res.status(201).json(successResponse(member, 'Membre ajouté au projet'));
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        // Gestion des erreurs spécifiques Prisma
-        if (error.code === 'P2002') {
-          return res.status(409).json(errorResponse('Ce contact est déjà membre du projet'));
-        }
-        if (error.code === 'P2003') {
-          return res.status(404).json(errorResponse('Projet ou Contact introuvable'));
-        }
+      const err = error as SqliteError;
+
+      // Gestion de l'unicité (Paire Contact/Projet déjà existante)
+      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        return res.status(409).json(errorResponse('Ce contact est déjà membre du projet'));
       }
 
-      // On relance les autres erreurs (500)
+      // Gestion des clés étrangères (Projet ou Contact inexistant)
+      if (err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+        return res.status(404).json(errorResponse('Projet ou Contact introuvable'));
+      }
+
       throw error;
     }
   }
 );
 
-/**
- * GET /api/v1/project/:id/members
- * Liste tous les membres associés au projet.
- */
 router.get(
   '/:id/members',
   validate(IdParamSchema, 'params'),
   async (req: Request, res: Response) => {
     const projectId = Number(req.params.id);
-
-    // Si le projet n'existe pas, getMembers renverra un tableau vide, ce qui est correct.
-    // On pourrait ajouter un check findById si on veut une 404 stricte.
     const members = await projectService.getMembers(projectId);
     res.status(200).json(successResponse(members));
   }
 );
 
-/**
- * DELETE /api/v1/project/:id/members/:contactId
- * Retire un membre du projet.
- */
 router.delete(
   '/:id/members/:contactId',
   validate(RemoveMemberParamsSchema, 'params'),

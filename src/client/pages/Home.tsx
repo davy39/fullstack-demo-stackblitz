@@ -1,9 +1,11 @@
 /**
  * Page d'accueil (Dashboard).
  *
- * Cette page sert de point d'entrée principal. Elle effectue une vérification
- * de santé du backend (Health Check) et affiche un résumé des données disponibles.
- * Elle guide également l'utilisateur si la base de données n'est pas configurée.
+ * Ce composant sert de point d'entrée principal à l'application.
+ * Il remplit trois fonctions essentielles au chargement :
+ * 1. Vérification de la santé du serveur (Health Check).
+ * 2. Chargement initial des statistiques (volumétrie des données).
+ * 3. Orientation de l'utilisateur (Guide d'installation si la BDD est vide/inaccessible).
  *
  * @module HomePage
  */
@@ -24,8 +26,8 @@ import {
   Chip,
   Alert,
   CircularProgress,
+  Grid,
 } from '@mui/material';
-import Grid from '@mui/material/Grid';
 
 // Icônes
 import {
@@ -37,157 +39,163 @@ import {
   Security as SecurityIcon,
 } from '@mui/icons-material';
 
+// Composants internes
 import DatabaseSetupGuide from '../components/DatabaseSetupGuide';
 
-// Types pour l'état des statistiques
+// Types partagés
+import type { ApiResponse, Contact, Task, Project } from '../../shared/index';
+
+/* -------------------------------------------------------------------------- */
+/*                                   Types                                    */
+/* -------------------------------------------------------------------------- */
+
+// Structure des statistiques affichées sur le dashboard
 interface DashboardStats {
   contacts: number;
   tasks: number;
   projects: number;
 }
 
-// Types pour l'état de connexion
+// États possibles du chargement initial
 type DbStatus = 'checking' | 'connected' | 'error';
+
+/* -------------------------------------------------------------------------- */
+/*                                 Composant                                  */
+/* -------------------------------------------------------------------------- */
 
 const Home = () => {
   const [dbStatus, setDbStatus] = useState<DbStatus>('checking');
   const [stats, setStats] = useState<DashboardStats | null>(null);
 
   /**
-   * Vérifie la connexion au backend et récupère les statistiques de base.
-   * Cette fonction est appelée au montage du composant.
+   * Effet de bord unique au montage du composant.
+   * Vérifie la connexion à l'API et charge les données statistiques.
    */
-  const checkDatabaseConnection = async () => {
-    try {
-      setDbStatus('checking');
-      console.log('🔍 Vérification de la connexion base de données...');
-
-      // 1. Health Check basique (Ping)
-      // catch(() => null) permet de ne pas lancer d'exception si le serveur est éteint
-      const healthRes = await axios.get('/api/v1/health').catch(() => null);
-
-      if (!healthRes) {
-        throw new Error('Le serveur ne répond pas');
-      }
-
-      // 2. Récupération des données (Counts)
-      // On utilise Promise.all pour paralléliser les requêtes
-      const [contactsRes, tasksRes, projectsRes] = await Promise.all([
-        axios.get('/api/v1/contact/list').catch(() => ({ data: { data: [] } })),
-        axios.get('/api/v1/task/list').catch(() => ({ data: { data: [] } })),
-        axios.get('/api/v1/project/list').catch(() => ({ data: { data: [] } })),
-      ]);
-
-      setStats({
-        contacts: contactsRes.data.data?.length || 0,
-        tasks: tasksRes.data.data?.length || 0,
-        projects: projectsRes.data.data?.length || 0,
-      });
-
-      setDbStatus('connected');
-      console.log('✅ Connexion réussie');
-    } catch (error) {
-      console.error('❌ Erreur de connexion:', error);
-      setDbStatus('error');
-    }
-  };
-
   useEffect(() => {
-    checkDatabaseConnection();
-  }, []);
+    // Définition de la fonction asynchrone à l'intérieur de l'effet
+    // pour éviter les avertissements de dépendances manquantes (React Hooks).
+    const initDashboard = async () => {
+      try {
+        // 1. Vérification de disponibilité de l'API (Ping)
+        await axios.get('/api/v1/health');
 
-  // Affichage conditionnel : Erreur de connexion
+        // 2. Récupération parallèle des données pour les compteurs
+        // On utilise Promise.all pour minimiser le temps d'attente global
+        const [contactsRes, tasksRes, projectsRes] = await Promise.all([
+          axios.get<ApiResponse<Contact[]>>('/api/v1/contact/list'),
+          axios.get<ApiResponse<Task[]>>('/api/v1/task/list'),
+          axios.get<ApiResponse<Project[]>>('/api/v1/project/list'),
+        ]);
+
+        // 3. Mise à jour de l'état avec les longueurs des tableaux
+        setStats({
+          contacts: contactsRes.data.data?.length || 0,
+          tasks: tasksRes.data.data?.length || 0,
+          projects: projectsRes.data.data?.length || 0,
+        });
+
+        setDbStatus('connected');
+      } catch (error) {
+        console.error('❌ Échec de la connexion au serveur:', error);
+        setDbStatus('error');
+      }
+    };
+
+    initDashboard();
+  }, []); // Tableau vide = exécution unique au montage
+
+  // Cas 1 : Échec de connexion (Serveur éteint ou BDD non initialisée)
   if (dbStatus === 'error') {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        <DatabaseSetupGuide onRetry={checkDatabaseConnection} />
+        <DatabaseSetupGuide onRetry={() => window.location.reload()} />
       </Container>
     );
   }
 
-  // Affichage conditionnel : Chargement
+  // Cas 2 : Chargement en cours
   if (dbStatus === 'checking') {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
         <Box textAlign="center" py={8}>
           <CircularProgress size={60} />
           <Typography variant="h6" sx={{ mt: 2 }}>
-            Vérification de la connexion...
+            Connexion au serveur en cours...
           </Typography>
         </Box>
       </Container>
     );
   }
 
-  // Configuration des cartes de fonctionnalités (Features)
+  /* -------------------------------------------------------------------------- */
+  /*                             Configuration UI                               */
+  /* -------------------------------------------------------------------------- */
+
+  // Cartes de navigation principales
   const features = [
     {
       icon: <ContactIcon fontSize="large" color="primary" />,
-      title: 'Gestion des Contacts',
-      description: "Gérez votre carnet d'adresses avec détails, entreprises et notes.",
+      title: 'Contacts',
+      description: "Gérez votre carnet d'adresses professionnel.",
       link: '/contacts',
       count: stats?.contacts || 0,
       color: 'primary' as const,
     },
     {
       icon: <TaskIcon fontSize="large" color="secondary" />,
-      title: 'Suivi des Tâches',
-      description: 'Suivez vos tâches avec priorités, statuts et assignations.',
+      title: 'Tâches',
+      description: "Suivez vos priorités et l'avancement (Kanban).",
       link: '/tasks',
       count: stats?.tasks || 0,
       color: 'secondary' as const,
     },
     {
       icon: <ProjectIcon fontSize="large" color="success" />,
-      title: "Projets d'Équipe",
-      description: 'Organisez vos projets, gérez les membres et les délais.',
+      title: 'Projets',
+      description: 'Organisez le travail des équipes et les délais.',
       link: '/projects',
       count: stats?.projects || 0,
       color: 'success' as const,
     },
   ];
 
-  // Configuration des cartes techniques
+  // Cartes d'information technique
   const techFeatures = [
     {
       icon: <CodeIcon />,
       title: 'Stack Moderne',
-      description: 'React 19, Vite, Express.js, SQLite (via Prisma) et TypeScript Strict.',
+      description: 'React 19, Vite, Express.js et Drizzle ORM.',
     },
     {
       icon: <RocketIcon />,
-      title: 'Expérience Dév',
-      description: 'Hot reload instantané, ESLint, Prettier et architecture modulaire.',
+      title: 'Performance',
+      description: 'Base de données SQLite via le driver rapide Better-SQLite3.',
     },
     {
       icon: <SecurityIcon />,
-      title: 'Production Ready',
-      description: "Validation Zod, gestion d'erreurs centralisée et sécurité HTTP.",
+      title: 'Sécurité & Typage',
+      description: 'Validation Zod stricte et types partagés Client/Serveur.',
     },
   ];
 
+  // Cas 3 : Affichage du Dashboard (Connecté)
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      {/* --- Section Héros --- */}
+      {/* Section Héros */}
       <Box textAlign="center" mb={6}>
         <Typography variant="h2" component="h1" gutterBottom fontWeight="bold">
-          Template Full-Stack Moderne
+          Drizzle Full-Stack
         </Typography>
         <Typography variant="h5" color="text.secondary" paragraph>
-          Une application de gestion de projet complète construite avec React, Express et SQLite.
+          Plateforme de démonstration utilisant une architecture moderne React & Node.js.
         </Typography>
 
-        {/* Message de succès si des données sont détectées */}
-        {stats && (stats.contacts > 0 || stats.tasks > 0 || stats.projects > 0) && (
-          <Alert
-            severity="success"
-            sx={{ mt: 2, mb: 4, maxWidth: 600, mx: 'auto', borderRadius: 2 }}
-          >
-            <Typography variant="body2">
-              🎉 La base de données est connectée et contient des données !
-            </Typography>
-          </Alert>
-        )}
+        {/* Indicateur de succès */}
+        <Alert severity="success" sx={{ mt: 2, mb: 4, maxWidth: 600, mx: 'auto', borderRadius: 2 }}>
+          <Typography variant="body2">
+            🎉 Système opérationnel : Base de données SQLite connectée.
+          </Typography>
+        </Alert>
 
         <Box>
           <Button
@@ -195,42 +203,14 @@ const Home = () => {
             size="large"
             component={RouterLink}
             to="/contacts"
-            sx={{
-              mr: 2,
-              px: 4,
-              py: 1.5,
-              fontSize: '1.1rem',
-              fontWeight: 600,
-              boxShadow: 3,
-            }}
+            sx={{ px: 4, py: 1.5, fontWeight: 600, boxShadow: 3 }}
           >
             Explorer l'App
-          </Button>
-          <Button
-            variant="outlined"
-            size="large"
-            href="https://github.com/Avinava/simple-vite-react-express"
-            target="_blank"
-            rel="noopener noreferrer"
-            sx={{
-              px: 4,
-              py: 1.5,
-              fontSize: '1.1rem',
-              fontWeight: 600,
-              borderWidth: 2,
-              '&:hover': { borderWidth: 2 },
-            }}
-          >
-            Voir le Code
           </Button>
         </Box>
       </Box>
 
-      {/* --- Section Fonctionnalités (Grid) --- */}
-      <Typography variant="h4" component="h2" textAlign="center" gutterBottom mb={4}>
-        Fonctionnalités Incluses
-      </Typography>
-
+      {/* Grille des Fonctionnalités */}
       <Grid container spacing={4} sx={{ mb: 8 }}>
         {features.map((feature, index) => (
           <Grid size={{ xs: 12, md: 4 }} key={index}>
@@ -274,9 +254,9 @@ const Home = () => {
         ))}
       </Grid>
 
-      {/* --- Section Technique --- */}
+      {/* Section Technique */}
       <Typography variant="h4" component="h2" textAlign="center" gutterBottom mb={4}>
-        Stack Technique
+        Architecture Technique
       </Typography>
 
       <Grid container spacing={4} sx={{ mb: 6 }}>

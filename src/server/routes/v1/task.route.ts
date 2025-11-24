@@ -1,24 +1,24 @@
 /**
- * Routeur de gestion des Tâches (Tasks).
+ * Routeur de gestion des Tâches.
  *
- * Ce module expose l'API RESTful pour la gestion du cycle de vie des tâches.
+ * Ce module expose l'API RESTful pour la création, la lecture, la mise à jour
+ * et la suppression des tâches (CRUD).
  *
- * Architecture :
- * - Validation : Centralisée via Zod (Shared Schemas).
- * - Erreurs : Utilisation native des Promesses Express 5 (async/await).
- * - Typage : Utilisation stricte des DTOs partagés.
+ * FONCTIONNALITÉS :
+ * - Filtrage avancé via paramètres d'URL (Query Params).
+ * - Gestion native des erreurs de base de données (SQLite) pour l'intégrité référentielle.
+ * - Validation stricte des données entrantes via les schémas Zod partagés.
  *
  * @module TaskRoutes
  */
 
-import { Prisma } from '@prisma/client';
 import { Router, Request, Response } from 'express';
 import { successResponse, errorResponse } from '../../utils/response.js';
 import * as taskService from '../../services/task.service.js';
 import {
   validate,
   IdParamSchema,
-  TaskSchema,
+  taskSchemas,
   UpdateTaskStatusSchema,
   CreateTaskDTO,
   UpdateTaskDTO,
@@ -27,38 +27,56 @@ import {
 
 const router = Router();
 
+/**
+ * Interface locale pour typer les erreurs renvoyées par le driver SQLite (Better-SQLite3).
+ * Permet d'accéder proprement à la propriété `.code`.
+ */
+interface SqliteError extends Error {
+  code: string;
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                Routes (Lecture)                            */
 /* -------------------------------------------------------------------------- */
 
 /**
  * GET /api/v1/task/list
- * Récupère la liste des tâches avec filtres optionnels.
+ * Récupère la liste des tâches.
+ * Accepte des filtres optionnels via les paramètres d'URL.
  *
- * @query {string} [status] - Filtrer par statut.
- * @query {string} [priority] - Filtrer par priorité.
- * @query {number} [assigneeId] - Filtrer par membre.
- * @query {number} [projectId] - Filtrer par projet.
+ * @query status - Filtrer par statut (TODO, DONE...)
+ * @query priority - Filtrer par priorité (HIGH, LOW...)
+ * @query assigneeId - Filtrer par ID du membre assigné
+ * @query projectId - Filtrer par ID du projet
  */
 router.get('/list', async (req: Request, res: Response) => {
-  // Extraction et conversion des paramètres de requête
   const { status, priority, assigneeId, projectId } = req.query;
-  const filters: any = {};
 
-  if (status) filters.status = status;
-  if (priority) filters.priority = priority;
-  // Conversion explicite car req.query renvoie des chaînes
+  // Construction d'un objet filtre strictement typé pour satisfaire TypeScript.
+  // Express renvoie req.query comme des chaînes de caractères ou undefined.
+  // Nous devons convertir les IDs en nombres.
+  const filters: {
+    status?: string;
+    priority?: string;
+    assigneeId?: number;
+    projectId?: number;
+  } = {};
+
+  if (status) filters.status = String(status);
+  if (priority) filters.priority = String(priority);
+  // Conversion explicite en nombre pour les IDs
   if (assigneeId) filters.assigneeId = Number(assigneeId);
   if (projectId) filters.projectId = Number(projectId);
 
-  // Express 5 gère automatiquement les erreurs (ex: DB down)
+  // Appel au service avec l'objet typé (plus besoin de 'as any')
   const tasks = await taskService.findAll(filters);
+
   res.status(200).json(successResponse(tasks, 'Tâches récupérées avec succès'));
 });
 
 /**
  * GET /api/v1/task/:id
- * Récupère les détails d'une tâche spécifique.
+ * Récupère une tâche unique par son ID.
  */
 router.get('/:id', validate(IdParamSchema, 'params'), async (req: Request, res: Response) => {
   const id = Number(req.params.id);
@@ -79,47 +97,43 @@ router.get('/:id', validate(IdParamSchema, 'params'), async (req: Request, res: 
  * POST /api/v1/task
  * Crée une nouvelle tâche.
  *
- * @body {CreateTaskDTO} - Données validées par TaskSchema.
+ * Gestion d'erreur : Intercepte les violations de clé étrangère (FOREIGNKEY)
+ * si le client tente d'assigner la tâche à un projet ou un contact inexistant.
  */
-router.post('/', validate(TaskSchema), async (req: Request, res: Response) => {
+router.post('/', validate(taskSchemas.create), async (req: Request, res: Response) => {
   const taskData = req.body as CreateTaskDTO;
 
   try {
     const task = await taskService.create(taskData);
     res.status(201).json(successResponse(task, 'Tâche créée avec succès'));
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      console.error('❌ Error creating task:', error);
+    const err = error as SqliteError;
 
-      // Gestion spécifique : Contrainte de Clé Étrangère (P2003)
-      // Arrive si on envoie un ID de projet ou de contact qui n'existe pas.
-      if (error.code === 'P2003') {
-        return res
-          .status(400) // Bad Request
-          .json(errorResponse("Le projet ou le contact assigné n'existe pas"));
-      }
+    // Code erreur SQLite 787 : SQLITE_CONSTRAINT_FOREIGNKEY
+    if (err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+      return res
+        .status(400) // Bad Request
+        .json(errorResponse("Le projet ou le contact assigné n'existe pas"));
     }
-    // Autres erreurs -> Express 5 (500 Internal Server Error)
+
+    // Propagation des autres erreurs (500 Internal Server Error)
     throw error;
   }
 });
 
 /**
  * PUT /api/v1/task/:id
- * Met à jour une tâche existante (Mise à jour partielle).
- *
- * @body {UpdateTaskDTO} - Champs partiels validés.
+ * Met à jour les informations générales d'une tâche.
  */
 router.put(
   '/:id',
   validate(IdParamSchema, 'params'),
-  validate(TaskSchema.partial()), // Utilisation de .partial() sur le schéma importé
+  validate(taskSchemas.update),
   async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const updateData = req.body as UpdateTaskDTO;
 
-    // Note : Le service gère le cas où l'ID n'existe pas et renvoie null
-    // (grâce au try/catch P2025 interne au service)
+    // Le service renvoie undefined si l'ID n'existe pas
     const task = await taskService.update(id, updateData);
 
     if (!task) {
@@ -152,9 +166,8 @@ router.delete('/:id', validate(IdParamSchema, 'params'), async (req: Request, re
 
 /**
  * PATCH /api/v1/task/:id/status
- * Met à jour uniquement le statut d'une tâche.
- *
- * @body {UpdateTaskStatusDTO} - { status: "..." }
+ * Route spécialisée pour le changement rapide de statut (ex: Drag & Drop Kanban).
+ * Accepte uniquement le champ { status }.
  */
 router.patch(
   '/:id/status',

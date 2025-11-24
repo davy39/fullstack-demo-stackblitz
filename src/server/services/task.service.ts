@@ -1,37 +1,55 @@
 /**
- * Service de gestion des Tâches.
+ * Service de gestion des Tâches (Drizzle ORM).
  *
- * Ce module contient la logique métier pour la manipulation des tâches.
- * Il gère les opérations CRUD, les assignations (Membres/Projets) et
- * les changements d'états (Workflow).
+ * Ce module gère les opérations CRUD, les assignations et le workflow des tâches.
+ *
+ * PARTICULARITÉS DRIZZLE :
+ * - Typage strict : Les filtres string doivent être castés pour matcher les enums du schéma.
+ * - Pattern "Insert-then-Fetch" : Pour renvoyer les relations après une création.
  *
  * @module TaskService
  */
 
-import { Prisma, TaskStatus } from '@prisma/client';
-import { prisma } from './database.js';
+import { and, asc, desc, eq, SQL } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { tasks, TASK_STATUSES, PRIORITIES } from '../../shared/db-schema.js';
+
+// Types partagés
+import type { TaskWithDetails } from '../../shared/types.js';
+import type { CreateTaskDTO, UpdateTaskDTO, UpdateTaskStatusDTO } from '../../shared/validators.js';
 
 /* -------------------------------------------------------------------------- */
 /*                                Opérations de Lecture                       */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Récupère la liste des tâches selon les filtres fournis.
- *
- * Les tâches sont triées par :
- * 1. Priorité (URGENT -> LOW)
- * 2. Date d'échéance (les plus proches d'abord)
- * 3. Date de création (les plus récentes d'abord)
- *
- * @param {Prisma.TaskWhereInput} filters - Critères de filtrage (statut, projet, assigné...).
- * @returns {Promise<Task[]>} Liste des tâches avec détails (assigné, projet).
- */
-export const findAll = async (filters: Prisma.TaskWhereInput = {}) => {
-  return prisma.task.findMany({
-    where: filters,
-    include: {
+interface TaskFilters {
+  status?: string;
+  priority?: string;
+  assigneeId?: number;
+  projectId?: number;
+}
+
+export const findAll = async (filters: TaskFilters = {}): Promise<TaskWithDetails[]> => {
+  const conditions: SQL[] = [];
+
+  // Cast explicite pour satisfaire le typage strict de Drizzle
+  // Drizzle s'attend à "TODO" | "DONE"... et non à "string"
+  if (filters.status) {
+    conditions.push(eq(tasks.status, filters.status as (typeof TASK_STATUSES)[number]));
+  }
+
+  if (filters.priority) {
+    conditions.push(eq(tasks.priority, filters.priority as (typeof PRIORITIES)[number]));
+  }
+
+  if (filters.assigneeId) conditions.push(eq(tasks.assigneeId, filters.assigneeId));
+  if (filters.projectId) conditions.push(eq(tasks.projectId, filters.projectId));
+
+  return db.query.tasks.findMany({
+    where: and(...conditions),
+    with: {
       assignee: {
-        select: {
+        columns: {
           id: true,
           firstName: true,
           lastName: true,
@@ -39,29 +57,23 @@ export const findAll = async (filters: Prisma.TaskWhereInput = {}) => {
         },
       },
       project: {
-        select: {
+        columns: {
           id: true,
           name: true,
           status: true,
         },
       },
     },
-    orderBy: [{ priority: 'desc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
+    orderBy: [desc(tasks.priority), asc(tasks.dueDate), desc(tasks.createdAt)],
   });
 };
 
-/**
- * Recherche une tâche par son identifiant.
- *
- * @param {number} id - L'identifiant de la tâche.
- * @returns {Promise<Task | null>} La tâche complète ou null si introuvable.
- */
-export const findById = async (id: number) => {
-  return prisma.task.findUnique({
-    where: { id },
-    include: {
+export const findById = async (id: number): Promise<TaskWithDetails | undefined> => {
+  return db.query.tasks.findFirst({
+    where: eq(tasks.id, id),
+    with: {
       assignee: {
-        select: {
+        columns: {
           id: true,
           firstName: true,
           lastName: true,
@@ -69,7 +81,7 @@ export const findById = async (id: number) => {
         },
       },
       project: {
-        select: {
+        columns: {
           id: true,
           name: true,
           description: true,
@@ -80,184 +92,65 @@ export const findById = async (id: number) => {
   });
 };
 
-/**
- * Récupère toutes les tâches associées à un projet spécifique.
- *
- * @param {number} projectId - ID du projet.
- * @returns {Promise<Task[]>} Liste des tâches du projet.
- */
-export const findByProject = async (projectId: number) => {
-  return prisma.task.findMany({
-    where: { projectId },
-    include: {
-      assignee: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-        },
-      },
-    },
-    orderBy: [{ priority: 'desc' }, { dueDate: 'asc' }],
-  });
+export const findByProject = async (projectId: number): Promise<TaskWithDetails[]> => {
+  return findAll({ projectId });
 };
 
-/**
- * Récupère toutes les tâches assignées à un contact spécifique.
- *
- * @param {number} assigneeId - ID du contact.
- * @returns {Promise<Task[]>} Liste des tâches assignées.
- */
-export const findByAssignee = async (assigneeId: number) => {
-  return prisma.task.findMany({
-    where: { assigneeId },
-    include: {
-      project: {
-        select: {
-          id: true,
-          name: true,
-          status: true,
-        },
-      },
-    },
-    orderBy: [{ priority: 'desc' }, { dueDate: 'asc' }],
-  });
+export const findByAssignee = async (assigneeId: number): Promise<TaskWithDetails[]> => {
+  return findAll({ assigneeId });
 };
 
 /* -------------------------------------------------------------------------- */
 /*                                Opérations d'Écriture                       */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Crée une nouvelle tâche.
- *
- * @param {Prisma.TaskCreateInput} data - Les données de la tâche.
- * @returns {Promise<Task>} La tâche créée.
- */
-export const create = async (data: Prisma.TaskCreateInput) => {
-  return prisma.task.create({
-    data,
-    include: {
-      assignee: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-        },
-      },
-      project: {
-        select: {
-          id: true,
-          name: true,
-          status: true,
-        },
-      },
-    },
-  });
+const getTaskWithRelations = async (id: number): Promise<TaskWithDetails> => {
+  const task = await findById(id);
+  if (!task) throw new Error(`Erreur interne : Tâche ID ${id} introuvable après écriture.`);
+  return task;
 };
 
-/**
- * Met à jour les informations d'une tâche.
- *
- * @param {number} id - ID de la tâche à modifier.
- * @param {Prisma.TaskUpdateInput} data - Données partielles à mettre à jour.
- * @returns {Promise<Task | null>} La tâche mise à jour ou null.
- */
-export const update = async (id: number, data: Prisma.TaskUpdateInput) => {
-  try {
-    return await prisma.task.update({
-      where: { id },
-      data,
-      include: {
-        assignee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-        project: {
-          select: {
-            id: true,
-            name: true,
-            status: true,
-          },
-        },
-      },
-    });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      // Code P2025 : "Record to update not found."
-      if (error.code === 'P2025') {
-        return null;
-      }
-    }
-    throw error;
-  }
+export const create = async (data: CreateTaskDTO): Promise<TaskWithDetails> => {
+  // On cast les enums ici aussi si nécessaire, bien que Zod le garantisse en amont
+  const payload = {
+    ...data,
+    status: data.status as (typeof TASK_STATUSES)[number],
+    priority: data.priority as (typeof PRIORITIES)[number],
+  };
+
+  const result = await db.insert(tasks).values(payload).returning({ id: tasks.id });
+  return getTaskWithRelations(result[0].id);
 };
 
-/**
- * Met à jour uniquement le statut d'une tâche.
- * Utile pour les tableaux Kanban ou les changements rapides d'état.
- *
- * @param {number} id - ID de la tâche.
- * @param {TaskStatus} status - Le nouveau statut (TODO, DONE, etc.).
- * @returns {Promise<Task | null>} La tâche mise à jour.
- */
-export const updateStatus = async (id: number, status: TaskStatus) => {
-  try {
-    return await prisma.task.update({
-      where: { id },
-      data: { status },
-      include: {
-        assignee: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-        project: {
-          select: {
-            id: true,
-            name: true,
-            status: true,
-          },
-        },
-      },
-    });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2025') {
-        return null;
-      }
-    }
-    throw error;
-  }
+export const update = async (
+  id: number,
+  data: UpdateTaskDTO
+): Promise<TaskWithDetails | undefined> => {
+  // Préparation du payload avec typage correct pour les champs optionnels
+  const payload: typeof data = { ...data };
+  if (data.status) payload.status = data.status as (typeof TASK_STATUSES)[number];
+  if (data.priority) payload.priority = data.priority as (typeof PRIORITIES)[number];
+
+  const result = await db
+    .update(tasks)
+    .set(payload)
+    .where(eq(tasks.id, id))
+    .returning({ id: tasks.id });
+
+  if (result.length === 0) return undefined;
+
+  return getTaskWithRelations(id);
 };
 
-/**
- * Supprime une tâche.
- *
- * @param {number} id - ID de la tâche à supprimer.
- * @returns {Promise<boolean>} true si supprimée, false si introuvable.
- */
+export const updateStatus = async (
+  id: number,
+  status: UpdateTaskStatusDTO['status']
+): Promise<TaskWithDetails | undefined> => {
+  return update(id, { status });
+};
+
 export const remove = async (id: number): Promise<boolean> => {
-  try {
-    await prisma.task.delete({
-      where: { id },
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2025') {
-        return false;
-      }
-    }
-    throw error;
-  }
+  const result = await db.delete(tasks).where(eq(tasks.id, id)).returning({ id: tasks.id });
+
+  return result.length > 0;
 };

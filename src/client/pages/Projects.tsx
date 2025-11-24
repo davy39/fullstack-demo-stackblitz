@@ -1,10 +1,8 @@
 /**
  * Page de gestion des Projets.
  *
- * Affiche une vue en grille (Grid) des projets existants avec leurs métadonnées clés :
- * - Barre de progression (basée sur les tâches terminées).
- * - Membres de l'équipe (Avatars).
- * - Statut et dates.
+ * Affichage des projets sous forme de grille avec indicateurs de progression.
+ *
  *
  * @module ProjectsPage
  */
@@ -41,26 +39,9 @@ import {
 
 // Composants internes et Types
 import AppLoading from '../components/AppLoading';
-import type { ApiResponse, Project, Task, ProjectMember, Contact } from '../../shared/index';
+import type { ApiResponse, ProjectWithDetails, Task } from '../../shared/index';
 
-/* -------------------------------------------------------------------------- */
-/*                                   Types                                    */
-/* -------------------------------------------------------------------------- */
-
-// Type composite représentant la structure JSON retournée par project.service.findAll
-// Prisma renvoie des objets imbriqués via 'include'
-interface ProjectWithDetails extends Project {
-  tasks: Pick<Task, 'id' | 'status' | 'priority'>[];
-  members: (ProjectMember & {
-    contact: Pick<Contact, 'id' | 'firstName' | 'lastName' | 'email'>;
-  })[];
-  _count: {
-    tasks: number;
-    members: number;
-  };
-}
-
-// Mapping des couleurs pour les puces de statut (Chips)
+// Mapping des couleurs pour les statuts
 const statusColors: Record<string, 'default' | 'primary' | 'secondary' | 'success' | 'warning'> = {
   active: 'success',
   planning: 'warning',
@@ -68,11 +49,8 @@ const statusColors: Record<string, 'default' | 'primary' | 'secondary' | 'succes
   on_hold: 'default',
 };
 
-/* -------------------------------------------------------------------------- */
-/*                                 Composant                                  */
-/* -------------------------------------------------------------------------- */
-
 const Projects: React.FC = () => {
+  // Le state utilise directement le type composite exporté du shared kernel
   const [projects, setProjects] = useState<ProjectWithDetails[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -82,7 +60,6 @@ const Projects: React.FC = () => {
   const fetchProjects = async () => {
     try {
       setLoading(true);
-      // Typage du retour Axios avec notre interface composite
       const response = await axios.get<ApiResponse<ProjectWithDetails[]>>('/api/v1/project/list');
 
       if (response.data.success && response.data.data) {
@@ -113,7 +90,6 @@ const Projects: React.FC = () => {
         const response = await axios.delete<ApiResponse>(`/api/v1/project/${projectId}`);
         if (response.data.success) {
           toast.success('Projet supprimé avec succès');
-          // Rechargement de la liste (ou on pourrait filtrer localement setProjects)
           fetchProjects();
         }
       } catch (error) {
@@ -130,6 +106,7 @@ const Projects: React.FC = () => {
     return new Date(dateString).toLocaleDateString('fr-FR');
   };
 
+  // Note: Pick<Task, ...> est compatible avec le type partagé
   const calculateProgress = (tasks: Pick<Task, 'status'>[]): number => {
     if (!tasks || tasks.length === 0) return 0;
     const completedTasks = tasks.filter((task) => task.status === 'DONE').length;
@@ -150,7 +127,6 @@ const Projects: React.FC = () => {
     return translations[status] || status;
   };
 
-  // Affichage Loader
   if (loading) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>

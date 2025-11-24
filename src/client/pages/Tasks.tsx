@@ -1,14 +1,21 @@
 /**
- * Page de gestion des Tâches.
+ * Page de gestion des Tâches (Kanban simplifié).
  *
- * Permet de visualiser, filtrer et gérer les tâches.
- * Inclut des fonctionnalités de changement rapide de statut (Workflow)
- * et de filtrage par priorité/statut.
+ * Cette page permet de :
+ * 1. Visualiser les tâches sous forme de cartes.
+ * 2. Filtrer les tâches par Statut et Priorité via l'API.
+ * 3. Modifier le statut d'une tâche rapidement (Workflow).
+ * 4. Supprimer des tâches.
+ *
+ * ARCHITECTURE :
+ * - Utilisation de `useCallback` pour stabiliser la fonction `fetchTasks` et respecter les règles des Hooks.
+ * - Typage strict via `TaskWithDetails` importé du module partagé pour éviter les erreurs `any`.
+ * - Mise à jour optimiste (Optimistic UI) lors du changement de statut pour une interface réactive.
  *
  * @module TasksPage
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 
@@ -27,8 +34,8 @@ import {
   MenuItem,
   IconButton,
   SelectChangeEvent,
+  Grid,
 } from '@mui/material';
-import Grid from '@mui/material/Grid';
 
 // Icônes
 import {
@@ -40,19 +47,13 @@ import {
 
 // Composants internes et Types
 import AppLoading from '../components/AppLoading';
-import type { ApiResponse, Task, Project, Contact } from '../../shared/index';
+import type { ApiResponse, TaskWithDetails } from '../../shared/index';
 
 /* -------------------------------------------------------------------------- */
-/*                                   Types                                    */
+/*                             Configuration UI                               */
 /* -------------------------------------------------------------------------- */
 
-// Type composite pour une tâche avec ses relations (retourné par l'API)
-interface TaskWithDetails extends Task {
-  project?: Pick<Project, 'id' | 'name' | 'status'> | null;
-  assignee?: Pick<Contact, 'id' | 'firstName' | 'lastName' | 'email'> | null;
-}
-
-// Configuration des couleurs pour les statuts et priorités
+// Définition des couleurs sémantiques pour les badges
 type ColorVariant = 'default' | 'primary' | 'secondary' | 'success' | 'warning' | 'error';
 
 const statusColors: Record<string, ColorVariant> = {
@@ -74,19 +75,26 @@ const priorityColors: Record<string, ColorVariant> = {
 /* -------------------------------------------------------------------------- */
 
 const Tasks: React.FC = () => {
+  // État des données
   const [tasks, setTasks] = useState<TaskWithDetails[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Filtres
+  // État des filtres
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [priorityFilter, setPriorityFilter] = useState<string>('');
 
   /**
-   * Récupère les tâches depuis l'API avec les filtres actifs.
+   * Récupère les tâches depuis l'API en fonction des filtres actuels.
+   *
+   * NOTE : Utilisation de `useCallback` pour mémoriser la fonction.
+   * Cela permet de l'ajouter sans danger dans le tableau de dépendances du useEffect,
+   * résolvant ainsi l'avertissement "react-hooks/exhaustive-deps".
    */
-  const fetchTasks = async () => {
+  const fetchTasks = useCallback(async () => {
     try {
       setLoading(true);
+
+      // Construction des paramètres de requête (Query String)
       const params = new URLSearchParams();
       if (statusFilter) params.append('status', statusFilter);
       if (priorityFilter) params.append('priority', priorityFilter);
@@ -104,18 +112,22 @@ const Tasks: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter, priorityFilter]); // La fonction est recréée uniquement si les filtres changent
 
-  // Rechargement automatique lors du changement des filtres
+  /**
+   * Effet déclenchant le chargement initial et lors du changement des filtres.
+   */
   useEffect(() => {
     fetchTasks();
-  }, [statusFilter, priorityFilter]);
+  }, [fetchTasks]);
 
   /**
    * Met à jour le statut d'une tâche (Workflow).
+   * Effectue une mise à jour locale immédiate pour la fluidité (Optimistic UI).
    */
   const handleStatusChange = async (taskId: number, newStatus: string) => {
     try {
+      // 1. Appel API
       const response = await axios.patch<ApiResponse<TaskWithDetails>>(
         `/api/v1/task/${taskId}/status`,
         { status: newStatus }
@@ -123,10 +135,12 @@ const Tasks: React.FC = () => {
 
       if (response.data.success) {
         toast.success('Statut mis à jour');
-        // Optimisation : Mise à jour locale pour éviter un rechargement complet
-        setTasks((prev) =>
-          prev.map(
-            (t) => (t.id === taskId ? { ...t, status: newStatus as any } : t) // Cast 'any' car TaskStatus est un enum ou string
+
+        // 2. Mise à jour de l'état local sans recharger toute la liste
+        // On utilise TaskWithDetails['status'] pour garantir le typage strict (pas de 'any')
+        setTasks((prevTasks) =>
+          prevTasks.map((task) =>
+            task.id === taskId ? { ...task, status: newStatus as TaskWithDetails['status'] } : task
           )
         );
       }
@@ -137,7 +151,7 @@ const Tasks: React.FC = () => {
   };
 
   /**
-   * Supprime une tâche.
+   * Supprime une tâche après confirmation.
    */
   const handleDeleteTask = async (taskId: number) => {
     if (window.confirm('Voulez-vous vraiment supprimer cette tâche ?')) {
@@ -146,6 +160,7 @@ const Tasks: React.FC = () => {
 
         if (response.data.success) {
           toast.success('Tâche supprimée');
+          // Suppression locale
           setTasks((prev) => prev.filter((t) => t.id !== taskId));
         }
       } catch (error) {
@@ -155,14 +170,14 @@ const Tasks: React.FC = () => {
     }
   };
 
-  /* --- Utilitaires --- */
+  /* --- Fonctions Utilitaires d'affichage --- */
 
   const formatDate = (dateString: Date | string | null | undefined): string => {
     if (!dateString) return 'Aucune échéance';
     return new Date(dateString).toLocaleDateString('fr-FR');
   };
 
-  const translateStatus = (status: string) => {
+  const translateStatus = (status: string): string => {
     const map: Record<string, string> = {
       TODO: 'À Faire',
       IN_PROGRESS: 'En Cours',
@@ -172,7 +187,7 @@ const Tasks: React.FC = () => {
     return map[status] || status;
   };
 
-  const translatePriority = (p: string) => {
+  const translatePriority = (p: string): string => {
     const map: Record<string, string> = {
       LOW: 'Basse',
       MEDIUM: 'Moyenne',
@@ -182,7 +197,7 @@ const Tasks: React.FC = () => {
     return map[p] || p;
   };
 
-  // Loader initial
+  // Affichage loader initial
   if (loading && tasks.length === 0) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -193,7 +208,7 @@ const Tasks: React.FC = () => {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      {/* En-tête */}
+      {/* En-tête avec Titre et Bouton Créer */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4" component="h1" sx={{ display: 'flex', alignItems: 'center' }}>
           <TaskIcon sx={{ mr: 1.5, verticalAlign: 'middle' }} />
@@ -214,7 +229,7 @@ const Tasks: React.FC = () => {
         </Button>
       </Box>
 
-      {/* Barre de Filtres */}
+      {/* Zone de Filtres */}
       <Box
         display="flex"
         gap={2}
@@ -295,7 +310,7 @@ const Tasks: React.FC = () => {
                   </Typography>
                 )}
 
-                {/* Badges */}
+                {/* Badges Statut et Priorité */}
                 <Box display="flex" gap={1} mb={2} flexWrap="wrap">
                   <Chip
                     label={translateStatus(task.status)}
@@ -310,6 +325,7 @@ const Tasks: React.FC = () => {
                   />
                 </Box>
 
+                {/* Métadonnées (Dates, Assigné, Projet) */}
                 <Typography variant="caption" display="block" color="text.secondary" mb={0.5}>
                   Échéance : {formatDate(task.dueDate)}
                 </Typography>
@@ -329,7 +345,7 @@ const Tasks: React.FC = () => {
                   </Typography>
                 )}
 
-                {/* Actions Rapides (Workflow) */}
+                {/* Boutons d'action rapide (Workflow) */}
                 <Box display="flex" gap={1} flexWrap="wrap" mt="auto" pt={2}>
                   {task.status !== 'TODO' && (
                     <Button

@@ -1,24 +1,25 @@
 /**
- * Service de gestion des Projets.
+ * Service de gestion des Projets (Drizzle ORM).
  *
- * Ce module contient la logique métier pour les projets, y compris :
- * - Le CRUD standard (Create, Read, Update, Delete).
- * - La gestion des membres (relation Many-to-Many avec Contacts).
- * - Le calcul de statistiques (agrégations).
+ * Ce module centralise les interactions avec la base de données pour l'entité Projet.
+ * Il utilise principalement l'API "Relational Query" de Drizzle pour récupérer
+ * les graphiques d'objets complexes (Projet + Tâches + Membres + Contacts) en une seule requête.
  *
  * @module ProjectService
  */
 
-import { Prisma } from '@prisma/client';
-import { prisma } from './database.js';
+import { and, desc, eq } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { projects, projectMembers } from '../../shared/db-schema.js';
+
+// Types partagés
+import type { Project, ProjectWithDetails, ProjectMember } from '../../shared/types.js';
+import type { AddMemberDTO, CreateProjectDTO, UpdateProjectDTO } from '../../shared/validators.js';
 
 /* -------------------------------------------------------------------------- */
 /*                                Interfaces                                  */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Structure de l'objet retourné par les statistiques de projet.
- */
 interface ProjectStats {
   totalTasks: number;
   totalMembers: number;
@@ -32,85 +33,85 @@ interface ProjectStats {
 /**
  * Récupère la liste des projets avec filtrage et relations incluses.
  *
- * @param {Prisma.ProjectWhereInput} filters - Filtres Prisma (ex: { status: 'active' }).
- * @returns {Promise<Project[]>} Liste des projets avec un aperçu des membres et tâches.
+ * Note sur l'implémentation :
+ * Drizzle récupère les relations (tâches, membres) sous forme de tableaux.
+ * Nous calculons les propriétés agrégées `_count` en post-traitement JavaScript
+ * pour correspondre à l'interface `ProjectWithDetails` attendue par le Frontend.
+ *
+ * @param {object} filters - Filtres optionnels (ex: { status: 'active' }).
+ * @returns {Promise<ProjectWithDetails[]>} Liste des projets enrichis.
  */
-export const findAll = async (filters: Prisma.ProjectWhereInput = {}) => {
-  return prisma.project.findMany({
-    where: filters,
-    include: {
-      // Inclusion intelligente : On ne récupère que les champs nécessaires
-      members: {
-        include: {
-          contact: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
-        },
-      },
+export const findAll = async (filters: { status?: string } = {}): Promise<ProjectWithDetails[]> => {
+  // Construction de la clause WHERE dynamique
+  const whereClause = filters.status ? eq(projects.status, filters.status) : undefined;
+
+  const results = await db.query.projects.findMany({
+    where: whereClause,
+    orderBy: [desc(projects.createdAt)],
+    with: {
+      // Récupération optimisée des tâches (seulement les champs nécessaires)
       tasks: {
-        select: {
+        columns: {
           id: true,
           title: true,
           status: true,
           priority: true,
         },
       },
-      // Agrégations légères pour les compteurs
-      _count: {
-        select: {
-          tasks: true,
-          members: true,
+      // Récupération des membres et de leurs contacts associés
+      members: {
+        with: {
+          contact: {
+            columns: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
         },
       },
     },
-    orderBy: {
-      createdAt: 'desc',
-    },
   });
+
+  // Transformation pour ajouter les compteurs (_count)
+  return results.map((project) => ({
+    ...project,
+    _count: {
+      tasks: project.tasks.length,
+      members: project.members.length,
+    },
+  }));
 };
 
 /**
  * Recherche un projet par son ID avec toutes ses données détaillées.
  *
  * @param {number} id - L'identifiant du projet.
- * @returns {Promise<Project | null>} Le projet complet ou null.
+ * @returns {Promise<any | undefined>} Le projet complet ou undefined.
  */
 export const findById = async (id: number) => {
-  return prisma.project.findUnique({
-    where: { id },
-    include: {
+  return db.query.projects.findFirst({
+    where: eq(projects.id, id),
+    with: {
       members: {
-        include: {
-          contact: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              phone: true,
-            },
-          },
+        with: {
+          contact: true, // Récupère toutes les infos du contact
         },
+        orderBy: (members, { asc }) => [asc(members.joinedAt)],
       },
       tasks: {
-        include: {
+        with: {
           assignee: {
-            select: {
+            columns: {
               id: true,
               firstName: true,
               lastName: true,
             },
           },
         },
-        orderBy: [
-          { priority: 'desc' }, // Les tâches urgentes en premier
-          { dueDate: 'asc' }, // Puis celles qui expirent bientôt
-        ],
+        // Tri des tâches : Priorité décroissante, puis date d'échéance croissante
+        orderBy: (t, { asc, desc }) => [desc(t.priority), asc(t.dueDate)],
       },
     },
   });
@@ -119,92 +120,44 @@ export const findById = async (id: number) => {
 /**
  * Crée un nouveau projet.
  *
- * @param {Prisma.ProjectCreateInput} data - Données du projet.
+ * @param {CreateProjectDTO} data - Données du projet.
  * @returns {Promise<Project>} Le projet créé.
  */
-export const create = async (data: Prisma.ProjectCreateInput) => {
-  return prisma.project.create({
-    data,
-    include: {
-      // On renvoie la structure vide des relations pour le frontend
-      members: true,
-      _count: {
-        select: {
-          tasks: true,
-          members: true,
-        },
-      },
-    },
-  });
+export const create = async (data: CreateProjectDTO): Promise<Project> => {
+  const result = await db.insert(projects).values(data).returning();
+  return result[0];
 };
 
 /**
  * Met à jour un projet existant.
  *
  * @param {number} id - ID du projet.
- * @param {Prisma.ProjectUpdateInput} data - Données partielles à mettre à jour.
- * @returns {Promise<Project | null>} Le projet mis à jour ou null si introuvable.
+ * @param {UpdateProjectDTO} data - Données partielles à mettre à jour.
+ * @returns {Promise<Project | undefined>} Le projet mis à jour ou undefined.
  */
-export const update = async (id: number, data: Prisma.ProjectUpdateInput) => {
-  try {
-    return await prisma.project.update({
-      where: { id },
-      data,
-      include: {
-        members: {
-          include: {
-            contact: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-              },
-            },
-          },
-        },
-        _count: {
-          select: {
-            tasks: true,
-            members: true,
-          },
-        },
-      },
-    });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2025') {
-        return null;
-      }
-    }
-    throw error;
-  }
+export const update = async (id: number, data: UpdateProjectDTO): Promise<Project | undefined> => {
+  const result = await db.update(projects).set(data).where(eq(projects.id, id)).returning();
+
+  return result[0];
 };
 
 /**
  * Supprime un projet.
  *
- * Note : Grâce à la configuration `onDelete: Cascade` dans le schéma Prisma,
+ * Grâce à la configuration `onDelete: 'cascade'` définie dans le schéma Drizzle,
  * la suppression d'un projet entraîne automatiquement la suppression
- * de ses tâches et de ses liens avec les membres.
+ * de ses tâches et de ses liens membres dans la base de données.
  *
  * @param {number} id - ID du projet.
  * @returns {Promise<boolean>} true si supprimé, false si introuvable.
  */
 export const remove = async (id: number): Promise<boolean> => {
-  try {
-    await prisma.project.delete({
-      where: { id },
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2025') {
-        return false;
-      }
-    }
-    throw error;
-  }
+  const result = await db
+    .delete(projects)
+    .where(eq(projects.id, id))
+    .returning({ id: projects.id });
+
+  return result.length > 0;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -213,53 +166,38 @@ export const remove = async (id: number): Promise<boolean> => {
 
 /**
  * Ajoute un membre à un projet.
- * Crée une entrée dans la table de jointure `ProjectMember`.
  *
  * @param {number} projectId - ID du projet.
- * @param {object} memberData - Données du membre (contactId, role).
- * @returns {Promise<ProjectMember>} L'entrée de membre créée.
+ * @param {AddMemberDTO} memberData - Données (contactId, role).
+ * @returns {Promise<ProjectMember>} L'entrée créée.
  */
 export const addMember = async (
   projectId: number,
-  memberData: { contactId: number; role?: string }
-) => {
-  return prisma.projectMember.create({
-    data: {
+  memberData: AddMemberDTO
+): Promise<ProjectMember> => {
+  const result = await db
+    .insert(projectMembers)
+    .values({
       projectId,
       contactId: memberData.contactId,
       role: memberData.role || 'member',
-    },
-    include: {
-      contact: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-        },
-      },
-      project: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-    },
-  });
+    })
+    .returning();
+
+  return result[0];
 };
 
 /**
  * Récupère tous les membres d'un projet.
  *
  * @param {number} projectId - ID du projet.
- * @returns {Promise<ProjectMember[]>} Liste des membres avec infos contact.
  */
 export const getMembers = async (projectId: number) => {
-  return prisma.projectMember.findMany({
-    where: { projectId },
-    include: {
+  return db.query.projectMembers.findMany({
+    where: eq(projectMembers.projectId, projectId),
+    with: {
       contact: {
-        select: {
+        columns: {
           id: true,
           firstName: true,
           lastName: true,
@@ -269,9 +207,7 @@ export const getMembers = async (projectId: number) => {
         },
       },
     },
-    orderBy: {
-      joinedAt: 'asc',
-    },
+    orderBy: [desc(projectMembers.joinedAt)],
   });
 };
 
@@ -280,28 +216,15 @@ export const getMembers = async (projectId: number) => {
  *
  * @param {number} projectId - ID du projet.
  * @param {number} contactId - ID du contact à retirer.
- * @returns {Promise<boolean>} true si retiré, false si introuvable.
+ * @returns {Promise<boolean>} true si retiré.
  */
 export const removeMember = async (projectId: number, contactId: number): Promise<boolean> => {
-  try {
-    // Utilisation de la clé unique composite définie dans le schéma Prisma
-    await prisma.projectMember.delete({
-      where: {
-        contactId_projectId: {
-          contactId,
-          projectId,
-        },
-      },
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2025') {
-        return false;
-      }
-    }
-    throw error;
-  }
+  const result = await db
+    .delete(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.contactId, contactId)))
+    .returning();
+
+  return result.length > 0;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -309,37 +232,27 @@ export const removeMember = async (projectId: number, contactId: number): Promis
 /* -------------------------------------------------------------------------- */
 
 /**
- * Calcule les statistiques d'un projet (nombre de tâches par statut, etc.).
+ * Calcule les statistiques d'un projet.
+ * Récupère les données brutes et effectue l'agrégation en mémoire (Map/Reduce).
  *
  * @param {number} projectId - ID du projet.
- * @returns {Promise<ProjectStats | null>} Statistiques ou null.
+ * @returns {Promise<ProjectStats | null>} Statistiques.
  */
 export const getProjectStats = async (projectId: number): Promise<ProjectStats | null> => {
-  // Récupération optimisée : on ne charge que les statuts des tâches
-  const stats = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: {
-      _count: {
-        select: {
-          tasks: true,
-          members: true,
-        },
-      },
-      tasks: {
-        select: {
-          status: true,
-        },
-      },
+  // 1. Vérifier si le projet existe et récupérer ses compteurs de base
+  const project = await db.query.projects.findFirst({
+    where: eq(projects.id, projectId),
+    with: {
+      tasks: { columns: { status: true } },
+      members: { columns: { id: true } }, // On récupère juste les IDs pour compter
     },
   });
 
-  if (!stats) return null;
+  if (!project) return null;
 
-  // Réduction (Map/Reduce) pour compter les tâches par statut
-  const tasksByStatus = stats.tasks.reduce(
+  // 2. Calcul de la répartition des statuts
+  const tasksByStatus = project.tasks.reduce(
     (acc, task) => {
-      // acc[task.status] = (valeur actuelle ou 0) + 1
-      // Utilisation de 'as string' car task.status est typé (Enum)
       const statusKey = task.status as string;
       acc[statusKey] = (acc[statusKey] || 0) + 1;
       return acc;
@@ -348,8 +261,8 @@ export const getProjectStats = async (projectId: number): Promise<ProjectStats |
   );
 
   return {
-    totalTasks: stats._count.tasks,
-    totalMembers: stats._count.members,
+    totalTasks: project.tasks.length,
+    totalMembers: project.members.length,
     tasksByStatus,
   };
 };

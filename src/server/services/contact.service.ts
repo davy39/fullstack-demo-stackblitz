@@ -1,85 +1,99 @@
 /**
- * Service de gestion des Contacts.
+ * Service de gestion des Contacts (Implémentation Drizzle).
  *
- * Ce module contient toute la logique métier liée aux contacts et agit comme une couche
- * d'abstraction entre le contrôleur (routes) et la base de données (Prisma).
+ * Ce module contient la logique métier liée aux contacts.
+ * Il traduit les demandes de l'application en requêtes SQL via Drizzle ORM.
+ *
+ * 1. Utilisation de `db.query` pour la lecture (API relationnelle).
+ * 2. Utilisation de `db.insert/update/delete` pour l'écriture (SQL Builder).
+ * 3. Utilisation explicite de `.returning()` pour récupérer les données après modification.
  *
  * @module ContactService
  */
 
-import { Contact } from '@prisma/client';
-import { prisma } from './database.js';
-import { CreateContactDTO, UpdateContactDTO } from '../middleware/validate.js';
+import { desc, eq } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { contacts } from '../../shared/db-schema.js';
+
+// Import des types partagés (DTOs et Modèles)
+import type { Contact } from '../../shared/types.js';
+import type { CreateContactDTO, UpdateContactDTO } from '../../shared/validators.js';
 
 class ContactService {
   /**
-   * Récupère la liste de tous les contacts enregistrés.
+   * Récupère la liste complète des contacts.
+   * Triée par date de création décroissante (du plus récent au plus ancien).
    *
-   * @returns {Promise<Contact[]>} Une promesse contenant le tableau des contacts.
+   * @returns {Promise<Contact[]>} Tableau des contacts.
    */
   async findAll(): Promise<Contact[]> {
-    return prisma.contact.findMany({
-      orderBy: {
-        createdAt: 'desc', // Tri par défaut : les plus récents en premier
-      },
+    // Utilisation de l'API "Relational Query" (db.query)
+    // C'est l'approche la plus simple pour des lectures standard.
+    return db.query.contacts.findMany({
+      orderBy: [desc(contacts.createdAt)],
     });
   }
 
   /**
-   * Recherche un contact par son identifiant unique.
+   * Recherche un contact par son ID unique.
    *
    * @param {number} id - L'identifiant du contact.
-   * @returns {Promise<Contact | null>} Le contact trouvé ou null s'il n'existe pas.
+   * @returns {Promise<Contact | undefined>} Le contact ou undefined s'il n'existe pas.
    */
-  async findById(id: number): Promise<Contact | null> {
-    return prisma.contact.findUnique({
-      where: { id },
-      // Optionnel : On pourrait inclure les relations ici (ex: tâches)
-      // include: { tasks: true }
+  async findById(id: number): Promise<Contact | undefined> {
+    return db.query.contacts.findFirst({
+      where: eq(contacts.id, id),
+      // On pourrait ajouter `with: { tasks: true }` ici si on voulait les relations
     });
   }
 
   /**
-   * Crée un nouveau contact dans la base de données.
+   * Crée un nouveau contact.
    *
-   * @param {CreateContactDTO} data - Les données validées du contact.
-   * @returns {Promise<Contact>} Le contact nouvellement créé.
-   * @throws {Prisma.PrismaClientKnownRequestError} Si l'email existe déjà (P2002).
+   * @param {CreateContactDTO} data - Les données validées (sans ID ni dates).
+   * @returns {Promise<Contact>} Le contact créé avec son ID généré.
    */
   async create(data: CreateContactDTO): Promise<Contact> {
-    return prisma.contact.create({
-      data,
-    });
+    // Utilisation du SQL Builder pour l'insertion.
+    // .values(data) : Drizzle mappe automatiquement les champs du DTO aux colonnes.
+    // .returning() : Indispensable pour récupérer l'objet créé (notamment l'ID auto-incrémenté).
+    const result = await db.insert(contacts).values(data).returning();
+
+    // Drizzle retourne toujours un tableau (car on peut insérer plusieurs lignes).
+    // On retourne le premier (et unique) élément.
+    return result[0];
   }
 
   /**
-   * Met à jour les informations d'un contact existant.
+   * Met à jour un contact existant.
    *
-   * @param {number} id - L'identifiant du contact à modifier.
-   * @param {UpdateContactDTO} data - Les données partielles à mettre à jour.
-   * @returns {Promise<Contact>} Le contact mis à jour.
-   * @throws {Prisma.PrismaClientKnownRequestError} Si le contact n'existe pas ou conflit d'email.
+   * @param {number} id - L'identifiant cible.
+   * @param {UpdateContactDTO} data - Les champs à modifier.
+   * @returns {Promise<Contact | undefined>} Le contact mis à jour ou undefined si l'ID n'existe pas.
    */
-  async update(id: number, data: UpdateContactDTO): Promise<Contact> {
-    return prisma.contact.update({
-      where: { id },
-      data,
-    });
+  async update(id: number, data: UpdateContactDTO): Promise<Contact | undefined> {
+    const result = await db
+      .update(contacts)
+      .set(data) // Applique les modifications partielles
+      .where(eq(contacts.id, id)) // Clause WHERE id = ?
+      .returning(); // Récupère la ligne modifiée
+
+    // Si l'ID n'existe pas, le tableau result sera vide.
+    return result[0];
   }
 
   /**
-   * Supprime définitivement un contact.
+   * Supprime un contact.
    *
-   * @param {number} id - L'identifiant du contact à supprimer.
-   * @returns {Promise<Contact>} Le contact qui vient d'être supprimé.
-   * @throws {Prisma.PrismaClientKnownRequestError} Si le contact n'existe pas.
+   * @param {number} id - L'identifiant à supprimer.
+   * @returns {Promise<Contact | undefined>} Le contact supprimé (pour confirmation) ou undefined.
    */
-  async delete(id: number): Promise<Contact> {
-    return prisma.contact.delete({
-      where: { id },
-    });
+  async delete(id: number): Promise<Contact | undefined> {
+    const result = await db.delete(contacts).where(eq(contacts.id, id)).returning();
+
+    return result[0];
   }
 }
 
-// Export d'une instance unique (Singleton) du service
+// Export d'une instance unique (Singleton)
 export default new ContactService();

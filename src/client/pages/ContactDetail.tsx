@@ -1,9 +1,13 @@
 /**
  * Page de détail d'un Contact.
  *
- * Affiche les informations complètes d'un contact spécifique.
- * Récupère l'ID depuis l'URL, interroge l'API, et affiche les données
- * en utilisant les types partagés pour garantir la cohérence.
+ * Cette page récupère et affiche les informations détaillées d'un contact spécifique
+ * en se basant sur son ID passé dans l'URL.
+ *
+ * ARCHITECTURE :
+ * Le typage de l'état et de la réponse API repose entièrement sur le module `shared`.
+ * Cela garantit que si le schéma de base de données change (ex: ajout d'un champ),
+ * TypeScript signalera ici les éventuelles incohérences.
  *
  * @module ContactDetailPage
  */
@@ -13,7 +17,7 @@ import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 
-// Composants Material UI
+// Composants Material UI pour la mise en page
 import {
   Avatar,
   Box,
@@ -39,34 +43,42 @@ import {
 // Composants internes
 import AppLoading from '../components/AppLoading';
 
-// --- IMPORT DES TYPES PARTAGÉS ---
+// --- IMPORT DU NOYAU PARTAGÉ ---
+// On importe les types définis centralement.
+// ApiResponse : Structure standardisée de toutes les réponses JSON de l'API.
+// Contact : Interface TypeScript correspondant exactement à la table SQL 'contacts'.
 import type { Contact, ApiResponse } from '../../shared/index';
 
 const ContactDetail: React.FC = () => {
-  // Typage du paramètre d'URL (id est une string par défaut dans React Router)
+  // Récupération de l'ID depuis l'URL (ex: /contact/12)
   const { id } = useParams<{ id: string }>();
 
+  // État local typé : peut être un Contact complet ou null (si non chargé/trouvé)
   const [contact, setContact] = useState<Contact | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  /**
+   * Effectue l'appel API pour récupérer les données.
+   * Déclenché au montage du composant ou si l'ID change.
+   */
   useEffect(() => {
     const fetchContact = async () => {
       if (!id) return;
 
       try {
         setIsLoading(true);
-        // Appel API typé avec ApiResponse<Contact>
-        // Cela garantit que response.data.data est bien un objet Contact unique
+
+        // Appel GET typé. axios sait maintenant que 'data' contient une ApiResponse<Contact>.
         const response = await axios.get<ApiResponse<Contact>>(`/api/v1/contact/${id}`);
 
         if (response.data.success && response.data.data) {
           setContact(response.data.data);
         } else {
-          toast.error('Contact introuvable');
+          toast.error('Contact introuvable dans la base de données.');
         }
       } catch (err) {
-        console.error('Erreur lors de la récupération du contact:', err);
-        toast.error('Impossible de charger les détails du contact');
+        console.error('Erreur technique:', err);
+        toast.error('Impossible de charger les détails du contact.');
       } finally {
         setIsLoading(false);
       }
@@ -75,7 +87,7 @@ const ContactDetail: React.FC = () => {
     fetchContact();
   }, [id]);
 
-  // Gestion de l'état de chargement
+  // Affichage de l'indicateur de chargement
   if (isLoading) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -84,7 +96,7 @@ const ContactDetail: React.FC = () => {
     );
   }
 
-  // Gestion du cas où le contact n'est pas trouvé (ex: ID invalide)
+  // Gestion du cas où l'API ne renvoie pas de contact (404 ou ID invalide)
   if (!contact) {
     return (
       <Container maxWidth="md" sx={{ py: 4, textAlign: 'center' }}>
@@ -98,8 +110,11 @@ const ContactDetail: React.FC = () => {
     );
   }
 
-  // Configuration des champs à afficher
-  // Cette approche par tableau rend le rendu JSX plus propre et maintenable
+  /**
+   * Configuration dynamique des champs à afficher.
+   * Cette liste permet de générer le rendu de manière itérative et propre.
+   * On filtre les champs optionnels (phone, company, notes) s'ils sont vides.
+   */
   const details = [
     {
       label: 'Prénom',
@@ -116,7 +131,6 @@ const ContactDetail: React.FC = () => {
       value: contact.email,
       icon: <EmailIcon sx={{ color: 'action.active' }} />,
     },
-    // Affichage conditionnel des champs optionnels s'ils existent dans la BDD
     ...(contact.phone
       ? [
           {
@@ -148,16 +162,17 @@ const ContactDetail: React.FC = () => {
 
   return (
     <Container maxWidth="md" sx={{ py: 4 }}>
-      {/* Bouton de retour */}
+      {/* Barre de navigation supérieure */}
       <Box mb={3}>
         <Button component={Link} to="/contacts" startIcon={<ArrowBackIcon />} color="inherit">
           Retour aux contacts
         </Button>
       </Box>
 
+      {/* Carte principale */}
       <Card elevation={2} sx={{ borderRadius: 2 }}>
         <CardContent sx={{ p: 4 }}>
-          {/* En-tête de la carte */}
+          {/* En-tête avec Avatar (Initiales) */}
           <Box display="flex" alignItems="center" mb={4}>
             <Avatar
               sx={{
@@ -167,7 +182,6 @@ const ContactDetail: React.FC = () => {
                 fontSize: '1.5rem',
               }}
             >
-              {/* Initiales du contact */}
               {contact.firstName[0]}
               {contact.lastName[0]}
             </Avatar>
@@ -185,7 +199,7 @@ const ContactDetail: React.FC = () => {
 
           <Divider sx={{ mb: 3 }} />
 
-          {/* Liste des détails */}
+          {/* Liste des informations */}
           {details.map((field, index) => (
             <Box key={field.label} sx={{ mb: index !== details.length - 1 ? 3 : 0 }}>
               <Box display="flex" alignItems="center" mb={0.5}>
