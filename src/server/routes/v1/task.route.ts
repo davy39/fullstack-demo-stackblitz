@@ -1,13 +1,12 @@
 /**
  * Routeur de gestion des Tâches.
  *
- * Ce module expose l'API RESTful pour la création, la lecture, la mise à jour
- * et la suppression des tâches (CRUD).
+ * API RESTful pour la gestion complète des tâches.
  *
- * FONCTIONNALITÉS :
- * - Filtrage avancé via paramètres d'URL (Query Params).
- * - Gestion native des erreurs de base de données (SQLite) pour l'intégrité référentielle.
- * - Validation stricte des données entrantes via les schémas Zod partagés.
+ * FEATURES :
+ * - Filtrage multi-critères via Query Params.
+ * - Sécurisation de l'intégrité référentielle via la gestion des erreurs Postgres (23503).
+ * - Workflow dédié pour le changement de statut (PATCH).
  *
  * @module TaskRoutes
  */
@@ -27,12 +26,9 @@ import {
 
 const router = Router();
 
-/**
- * Interface locale pour typer les erreurs renvoyées par le driver SQLite (Better-SQLite3).
- * Permet d'accéder proprement à la propriété `.code`.
- */
-interface SqliteError extends Error {
+interface PgError extends Error {
   code: string;
+  detail?: string;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -41,20 +37,12 @@ interface SqliteError extends Error {
 
 /**
  * GET /api/v1/task/list
- * Récupère la liste des tâches.
- * Accepte des filtres optionnels via les paramètres d'URL.
- *
- * @query status - Filtrer par statut (TODO, DONE...)
- * @query priority - Filtrer par priorité (HIGH, LOW...)
- * @query assigneeId - Filtrer par ID du membre assigné
- * @query projectId - Filtrer par ID du projet
+ * Récupère la liste des tâches avec filtres optionnels.
  */
 router.get('/list', async (req: Request, res: Response) => {
   const { status, priority, assigneeId, projectId } = req.query;
 
-  // Construction d'un objet filtre strictement typé pour satisfaire TypeScript.
-  // Express renvoie req.query comme des chaînes de caractères ou undefined.
-  // Nous devons convertir les IDs en nombres.
+  // Construction d'un objet de filtre typé
   const filters: {
     status?: string;
     priority?: string;
@@ -64,19 +52,17 @@ router.get('/list', async (req: Request, res: Response) => {
 
   if (status) filters.status = String(status);
   if (priority) filters.priority = String(priority);
-  // Conversion explicite en nombre pour les IDs
+  // Conversion explicite des IDs (reçus en string)
   if (assigneeId) filters.assigneeId = Number(assigneeId);
   if (projectId) filters.projectId = Number(projectId);
 
-  // Appel au service avec l'objet typé (plus besoin de 'as any')
   const tasks = await taskService.findAll(filters);
-
   res.status(200).json(successResponse(tasks, 'Tâches récupérées avec succès'));
 });
 
 /**
  * GET /api/v1/task/:id
- * Récupère une tâche unique par son ID.
+ * Récupère une tâche par son ID.
  */
 router.get('/:id', validate(IdParamSchema, 'params'), async (req: Request, res: Response) => {
   const id = Number(req.params.id);
@@ -96,9 +82,6 @@ router.get('/:id', validate(IdParamSchema, 'params'), async (req: Request, res: 
 /**
  * POST /api/v1/task
  * Crée une nouvelle tâche.
- *
- * Gestion d'erreur : Intercepte les violations de clé étrangère (FOREIGNKEY)
- * si le client tente d'assigner la tâche à un projet ou un contact inexistant.
  */
 router.post('/', validate(taskSchemas.create), async (req: Request, res: Response) => {
   const taskData = req.body as CreateTaskDTO;
@@ -107,23 +90,23 @@ router.post('/', validate(taskSchemas.create), async (req: Request, res: Respons
     const task = await taskService.create(taskData);
     res.status(201).json(successResponse(task, 'Tâche créée avec succès'));
   } catch (error) {
-    const err = error as SqliteError;
+    const err = error as PgError;
 
-    // Code erreur SQLite 787 : SQLITE_CONSTRAINT_FOREIGNKEY
-    if (err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+    // Code Postgres 23503 : foreign_key_violation
+    // Cela arrive si assigneeId ou projectId ne correspond à aucun enregistrement existant.
+    if (err.code === '23503') {
       return res
         .status(400) // Bad Request
         .json(errorResponse("Le projet ou le contact assigné n'existe pas"));
     }
 
-    // Propagation des autres erreurs (500 Internal Server Error)
     throw error;
   }
 });
 
 /**
  * PUT /api/v1/task/:id
- * Met à jour les informations générales d'une tâche.
+ * Met à jour une tâche existante.
  */
 router.put(
   '/:id',
@@ -133,14 +116,23 @@ router.put(
     const id = Number(req.params.id);
     const updateData = req.body as UpdateTaskDTO;
 
-    // Le service renvoie undefined si l'ID n'existe pas
-    const task = await taskService.update(id, updateData);
+    try {
+      const task = await taskService.update(id, updateData);
 
-    if (!task) {
-      return res.status(404).json(errorResponse('Tâche introuvable'));
+      if (!task) {
+        return res.status(404).json(errorResponse('Tâche introuvable'));
+      }
+
+      res.status(200).json(successResponse(task, 'Tâche mise à jour avec succès'));
+    } catch (error) {
+      const err = error as PgError;
+
+      // Vérification aussi lors de l'update (ex: changement d'assignation invalide)
+      if (err.code === '23503') {
+        return res.status(400).json(errorResponse("Le projet ou le contact assigné n'existe pas"));
+      }
+      throw error;
     }
-
-    res.status(200).json(successResponse(task, 'Tâche mise à jour avec succès'));
   }
 );
 
@@ -166,8 +158,7 @@ router.delete('/:id', validate(IdParamSchema, 'params'), async (req: Request, re
 
 /**
  * PATCH /api/v1/task/:id/status
- * Route spécialisée pour le changement rapide de statut (ex: Drag & Drop Kanban).
- * Accepte uniquement le champ { status }.
+ * Route dédiée au changement de statut (Kanban).
  */
 router.patch(
   '/:id/status',

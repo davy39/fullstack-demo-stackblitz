@@ -1,50 +1,39 @@
 /**
- * Guide de configuration de la base de données (Version Simplifiée).
+ * Guide de dépannage Base de Données (Version PGLite).
  *
- * Ce composant s'affiche en cas d'erreur de connexion au backend.
- * Il présente les 4 étapes essentielles pour initialiser l'environnement SQLite/Prisma
- * de manière concise.
+ * S'affiche si l'application n'arrive pas à contacter le serveur ou la base de données.
+ * Explique le fonctionnement de PGLite (Postgres in WASM) et comment redémarrer.
  *
- * @module Components
+ * @module DatabaseSetupGuide
  */
 
 import React from 'react';
-
-// Composants Material UI
 import { Alert, Box, Typography, Paper, Button } from '@mui/material';
-
-// Icônes
 import {
   Storage as DatabaseIcon,
   Rocket as RocketIcon,
-  CheckCircle as CheckIcon,
   MenuBook as DocIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 
-/**
- * Définition des propriétés du composant.
- */
 interface DatabaseSetupGuideProps {
-  /** Fonction pour relancer la vérification de connexion (ping) */
   onRetry: () => void;
 }
 
 const DatabaseSetupGuide: React.FC<DatabaseSetupGuideProps> = ({ onRetry }) => {
   return (
     <Box sx={{ maxWidth: 800, mx: 'auto', p: 3 }}>
-      {/* Alerte d'erreur initiale */}
-      <Alert severity="warning" sx={{ mb: 3 }}>
+      {/* Alerte d'erreur */}
+      <Alert severity="error" sx={{ mb: 3 }}>
         <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <DatabaseIcon />
-          Configuration requise
+          Connexion PGLite échouée
         </Typography>
         <Typography variant="body2">
-          Impossible de se connecter à la base de données. Elle n'est probablement pas encore
-          initialisée.
+          Le serveur ne répond pas ou la base de données n'a pas pu être initialisée.
         </Typography>
       </Alert>
 
-      {/* Carte principale des instructions */}
       <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
         <Typography
           variant="h5"
@@ -52,96 +41,66 @@ const DatabaseSetupGuide: React.FC<DatabaseSetupGuideProps> = ({ onRetry }) => {
           sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
         >
           <RocketIcon color="primary" />
-          Installation Rapide
+          Architecture PGLite
         </Typography>
 
-        {/* Correction : Remplacement de 'paragraph' par sx={{ mb: 2 }} */}
         <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-          Ce projet utilise **SQLite** via Prisma. Suivez ces étapes dans votre terminal :
+          Ce projet n'utilise pas SQLite, mais <strong>PGLite</strong> : une version complète de
+          PostgreSQL compilée en WebAssembly qui tourne directement dans Node.js.
         </Typography>
 
-        <Box sx={{ my: 3 }}>
-          {/* Étape 1 */}
-          <Typography variant="h6" gutterBottom>
-            1. Créer le fichier d'environnement
+        <Box sx={{ my: 3, bgcolor: 'grey.50', p: 2, borderRadius: 1, border: '1px dashed #ccc' }}>
+          <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+            Comment ça marche ?
           </Typography>
-          <Paper sx={{ p: 2, bgcolor: 'grey.100', fontFamily: 'monospace', mb: 2 }}>
-            cp example.env .env
-          </Paper>
-
-          {/* Étape 2 */}
-          <Typography variant="h6" gutterBottom>
-            2. Vérifier la configuration
+          <Typography variant="body2" paragraph>
+            1. PGLite ne nécessite <strong>aucun serveur externe</strong> (pas de Docker).
           </Typography>
-          {/* Correction ici aussi */}
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Ouvrez le fichier <code>.env</code> et assurez-vous que l'URL pointe vers le fichier
-            local :
+          <Typography variant="body2" paragraph>
+            2. Les données sont stockées localement dans le dossier : <code>./pgdata</code>
           </Typography>
-          <Paper sx={{ p: 2, bgcolor: 'grey.100', fontFamily: 'monospace', mb: 2 }}>
-            DATABASE_URL="file:./dev.db"
-          </Paper>
-
-          {/* Étape 3 */}
-          <Typography variant="h6" gutterBottom>
-            3. Initialiser la base de données
-          </Typography>
-          <Paper sx={{ p: 2, bgcolor: 'grey.100', fontFamily: 'monospace', mb: 2 }}>
-            npm run db:setup
-          </Paper>
-
-          {/* Étape 4 */}
-          <Typography variant="h6" gutterBottom>
-            4. Ajouter des données de test (Optionnel)
-          </Typography>
-          <Paper sx={{ p: 2, bgcolor: 'grey.100', fontFamily: 'monospace', mb: 2 }}>
-            npm run db:seed
-          </Paper>
-        </Box>
-
-        {/* Résumé des fonctionnalités */}
-        <Box sx={{ mt: 3 }}>
-          <Typography
-            variant="h6"
-            gutterBottom
-            sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
-          >
-            <CheckIcon color="success" />
-            Ce que vous obtiendrez
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
-            • Système de gestion de contacts complet
-            <br />
-            • Gestion de projets avec assignation d'équipe
-            <br />
-            • Suivi des tâches (statuts, priorités)
-            <br />• Données d'exemple pour tester l'interface
+          <Typography variant="body2">
+            3. Le script <code>npm run dev</code> gère tout automatiquement (nettoyage, migration,
+            seed).
           </Typography>
         </Box>
 
-        {/* Boutons d'action */}
-        <Box sx={{ mt: 3, display: 'flex', gap: 2 }}>
-          <Button variant="contained" onClick={onRetry} startIcon={<DatabaseIcon />}>
-            Vérifier la connexion
+        {/* Actions de dépannage */}
+        <Typography variant="h6" gutterBottom sx={{ mt: 3 }}>
+          Solutions
+        </Typography>
+
+        <Typography variant="body2" paragraph>
+          Si vous voyez cet écran, essayez de relancer le serveur complètement :
+        </Typography>
+
+        <Paper
+          sx={{ p: 2, bgcolor: 'grey.900', color: 'common.white', fontFamily: 'monospace', mb: 2 }}
+        >
+          npm run dev
+        </Paper>
+
+        <Box sx={{ mt: 3, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+          <Button variant="contained" onClick={onRetry} startIcon={<RefreshIcon />}>
+            Réessayer la connexion
           </Button>
 
           <Button
             variant="outlined"
-            href="https://www.prisma.io/docs/"
+            href="https://pglite.dev/"
             target="_blank"
             rel="noopener noreferrer"
             startIcon={<DocIcon />}
           >
-            Documentation Prisma
+            Documentation PGLite
           </Button>
         </Box>
       </Paper>
 
-      {/* Note de bas de page */}
       <Alert severity="info">
         <Typography variant="body2">
-          <strong>Besoin d'aide ?</strong> Consultez le fichier <code>README.md</code> pour plus de
-          détails.
+          <strong>Note :</strong> En environnement WebContainer (StackBlitz/Codeflow), PGLite est la
+          solution la plus stable car elle n'utilise pas de binaires natifs C++.
         </Typography>
       </Alert>
     </Box>

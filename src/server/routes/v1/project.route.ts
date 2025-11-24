@@ -1,12 +1,12 @@
 /**
  * Routeur de gestion des Projets.
  *
- * Ce module expose l'API RESTful pour la gestion des projets et des membres.
+ * Ce module expose l'API RESTful pour la gestion du cycle de vie des projets
+ * et de leurs membres.
  *
- * TRANSITION DRIZZLE :
- * - Suppression des types d'erreurs Prisma.
- * - Utilisation de codes d'erreurs SQLite natifs pour gérer les contraintes
- *   (Unicité des membres, Clés étrangères invalides).
+ * CODES ERREURS POSTGRES :
+ * - 23505 (Unique Violation) : Utilisé pour empêcher d'ajouter deux fois le même membre.
+ * - 23503 (Foreign Key Violation) : Utilisé si on tente d'ajouter un contact inconnu.
  *
  * @module ProjectRoutes
  */
@@ -26,8 +26,7 @@ import {
 
 const router = Router();
 
-// Interface minimale pour typer les erreurs renvoyées par better-sqlite3
-interface SqliteError extends Error {
+interface PgError extends Error {
   code: string;
 }
 
@@ -39,6 +38,7 @@ router.get('/list', async (req: Request, res: Response) => {
   const { status } = req.query;
   const filters: { status?: string } = {};
 
+  // Application du filtre optionnel
   if (status && typeof status === 'string') {
     filters.status = status;
   }
@@ -114,15 +114,15 @@ router.post(
       const member = await projectService.addMember(projectId, memberData);
       res.status(201).json(successResponse(member, 'Membre ajouté au projet'));
     } catch (error) {
-      const err = error as SqliteError;
+      const err = error as PgError;
 
-      // Gestion de l'unicité (Paire Contact/Projet déjà existante)
-      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      // Cas 1 : Le couple (projectId, contactId) existe déjà
+      if (err.code === '23505') {
         return res.status(409).json(errorResponse('Ce contact est déjà membre du projet'));
       }
 
-      // Gestion des clés étrangères (Projet ou Contact inexistant)
-      if (err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+      // Cas 2 : Le Contact ou le Projet n'existe pas
+      if (err.code === '23503') {
         return res.status(404).json(errorResponse('Projet ou Contact introuvable'));
       }
 
@@ -136,6 +136,7 @@ router.get(
   validate(IdParamSchema, 'params'),
   async (req: Request, res: Response) => {
     const projectId = Number(req.params.id);
+    // Note : Si le projet n'existe pas, cela renvoie une liste vide, ce qui est acceptable REST
     const members = await projectService.getMembers(projectId);
     res.status(200).json(successResponse(members));
   }

@@ -1,28 +1,19 @@
 /**
- * DÉFINITION DU SCHÉMA DE BASE DE DONNÉES (Drizzle ORM)
+ * DÉFINITION DU SCHÉMA DE BASE DE DONNÉES (PostgreSQL / PGLite)
  *
- * Ce fichier agit comme la "Source de Vérité" unique pour l'ensemble de l'application.
- * Il remplace le fichier `schema.prisma`.
- *
- * Rôles de ce fichier :
- * 1. Définir la structure physique des tables SQLite (Colonnes, Types, Clés étrangères).
- * 2. Définir les relations logiques entre les tables pour les requêtes imbriquées (Relations).
- * 3. Servir de base pour la génération automatique des types TypeScript et des schémas Zod.
+ * Ce fichier définit la structure des tables pour PostgreSQL.
+ * Nous utilisons PGLite (Postgres in WASM) pour une compatibilité totale
+ * avec les environnements conteneurisés (StackBlitz, Codeflow).
  *
  * @module DatabaseSchema
  */
 
-import { relations, sql } from 'drizzle-orm';
-import { integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
+import { relations } from 'drizzle-orm';
+import { pgTable, serial, text, timestamp, integer, unique } from 'drizzle-orm/pg-core';
 
 /* -------------------------------------------------------------------------- */
 /*                            1. Constantes & Enums                           */
 /* -------------------------------------------------------------------------- */
-/**
- * Définition des valeurs possibles pour les énumérations.
- * SQLite ne gère pas les ENUMs natifs, on utilise donc des colonnes TEXT
- * avec une validation applicative (TypeScript/Zod).
- */
 export const TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE'] as const;
 export const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
 
@@ -32,133 +23,101 @@ export const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
 
 /**
  * Table `Contact`
- * Représente une personne ou une entité dans le carnet d'adresses.
  */
-export const contacts = sqliteTable('Contact', {
-  // Clé primaire auto-incrémentée
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const contacts = pgTable('contacts', {
+  // 'serial' est l'équivalent Postgres de l'auto-incrément
+  id: serial('id').primaryKey(),
 
-  // Champs textuels standards
-  firstName: text('firstName').notNull(),
-  lastName: text('lastName').notNull(),
-
-  // Email unique (contrainte gérée par SQLite)
+  firstName: text('first_name').notNull(),
+  lastName: text('last_name').notNull(),
   email: text('email').notNull().unique(),
 
-  // Champs optionnels
   phone: text('phone'),
   company: text('company'),
   notes: text('notes'),
 
-  // Timestamps :
-  // On utilise `mode: 'timestamp'` pour que Drizzle convertisse automatiquement
-  // le nombre (millisecondes) stocké en base vers un objet `Date` JS.
-  createdAt: integer('createdAt', { mode: 'timestamp' })
+  // Timestamps natifs Postgres
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
     .notNull()
-    .default(sql`(unixepoch() * 1000)`), // Défaut : date actuelle (en ms)
-
-  updatedAt: integer('updatedAt', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`)
-    .$onUpdate(() => new Date()), // Met à jour la date automatiquement lors d'un .update()
+    .$onUpdate(() => new Date()),
 });
 
 /**
  * Table `Project`
- * Représente un projet sur lequel travaillent des contacts.
  */
-export const projects = sqliteTable('Project', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const projects = pgTable('projects', {
+  id: serial('id').primaryKey(),
 
   name: text('name').notNull(),
   description: text('description'),
   status: text('status').default('active').notNull(),
 
-  // Gestion des dates (Début / Fin)
-  startDate: integer('startDate', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-  endDate: integer('endDate', { mode: 'timestamp' }),
+  startDate: timestamp('start_date').defaultNow().notNull(),
+  endDate: timestamp('end_date'),
 
-  createdAt: integer('createdAt', { mode: 'timestamp' })
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
     .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-  updatedAt: integer('updatedAt', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`)
     .$onUpdate(() => new Date()),
 });
 
 /**
  * Table `Task`
- * Tâches assignées à des contacts et liées à des projets.
  */
-export const tasks = sqliteTable('Task', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
+export const tasks = pgTable('tasks', {
+  id: serial('id').primaryKey(),
 
   title: text('title').notNull(),
   description: text('description'),
 
-  // Utilisation des constantes définies plus haut pour le "typage" des colonnes texte
   status: text('status', { enum: TASK_STATUSES }).default('TODO').notNull(),
   priority: text('priority', { enum: PRIORITIES }).default('MEDIUM').notNull(),
 
-  dueDate: integer('dueDate', { mode: 'timestamp' }),
+  dueDate: timestamp('due_date'),
 
-  // Clés étrangères (Foreign Keys)
-  // onDelete: 'set null' -> Si le contact est supprimé, la tâche reste mais assigneeId devient null
-  assigneeId: integer('assigneeId').references(() => contacts.id, { onDelete: 'set null' }),
+  // Clés étrangères
+  assigneeId: integer('assignee_id').references(() => contacts.id, { onDelete: 'set null' }),
+  projectId: integer('project_id').references(() => projects.id, { onDelete: 'cascade' }),
 
-  // onDelete: 'cascade' -> Si le projet est supprimé, les tâches associées le sont aussi
-  projectId: integer('projectId').references(() => projects.id, { onDelete: 'cascade' }),
-
-  createdAt: integer('createdAt', { mode: 'timestamp' })
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at')
+    .defaultNow()
     .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-  updatedAt: integer('updatedAt', { mode: 'timestamp' })
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`)
     .$onUpdate(() => new Date()),
 });
 
 /**
- * Table `ProjectMember` (Table de jointure)
- * Gère la relation Many-to-Many entre Contacts et Projets.
+ * Table `ProjectMember`
  */
-export const projectMembers = sqliteTable(
-  'ProjectMember',
+export const projectMembers = pgTable(
+  'project_members',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
+    id: serial('id').primaryKey(),
     role: text('role').default('member').notNull(),
-    joinedAt: integer('joinedAt', { mode: 'timestamp' })
-      .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+    joinedAt: timestamp('joined_at').defaultNow().notNull(),
 
-    // Relations FK
-    contactId: integer('contactId')
+    contactId: integer('contact_id')
       .notNull()
       .references(() => contacts.id, { onDelete: 'cascade' }),
-    projectId: integer('projectId')
+    projectId: integer('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
   },
-  (t) => ({
-    // Contrainte d'unicité composite : Un contact ne peut être qu'une seule fois dans un projet
-    unq: unique().on(t.contactId, t.projectId),
-  })
+  (t) => [unique('project_members_unq').on(t.contactId, t.projectId)]
 );
 
 /* -------------------------------------------------------------------------- */
-/*                            3. Relations (Application Level)                */
+/*                            3. Relations                                    */
 /* -------------------------------------------------------------------------- */
-/**
- * Ces définitions permettent à Drizzle de comprendre comment les tables sont liées.
- * C'est ce qui permet d'utiliser la syntaxe `db.query.contacts.findMany({ with: { tasks: true } })`.
- */
+// Les relations Drizzle (Application level) restent identiques à la version SQLite
+// car c'est une abstraction par-dessus le SQL.
 
 export const contactsRelations = relations(contacts, ({ many }) => ({
-  tasks: many(tasks), // Un contact peut avoir plusieurs tâches
-  memberships: many(projectMembers), // Un contact peut être membre de plusieurs projets
+  tasks: many(tasks),
+  memberships: many(projectMembers),
 }));
 
 export const tasksRelations = relations(tasks, ({ one }) => ({
@@ -173,8 +132,8 @@ export const tasksRelations = relations(tasks, ({ one }) => ({
 }));
 
 export const projectsRelations = relations(projects, ({ many }) => ({
-  tasks: many(tasks), // Un projet a plusieurs tâches
-  members: many(projectMembers), // Un projet a plusieurs membres
+  tasks: many(tasks),
+  members: many(projectMembers),
 }));
 
 export const projectMembersRelations = relations(projectMembers, ({ one }) => ({

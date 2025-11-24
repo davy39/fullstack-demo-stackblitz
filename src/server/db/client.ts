@@ -1,23 +1,25 @@
 /**
- * Infrastructure Base de Données.
+ * Infrastructure Base de Données (PGLite - PostgreSQL in WASM).
  *
- * Ce fichier est responsable uniquement de l'établissement de la connexion.
- * Il est importé par les services qui ont besoin d'interagir avec la DB.
+ * Ce fichier initialise une instance PostgreSQL légère qui tourne
+ * directement dans le processus Node.js (pas de serveur externe requis).
  *
- * Chemin : src/server/db/client.ts
+ * @module DatabaseClient
  */
 import 'dotenv/config';
-import { drizzle } from 'drizzle-orm/libsql'; // <-- Changement ici
-import { createClient } from '@libsql/client'; // <-- Changement ici
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '../../shared/db-schema.js';
 
-// Configuration de l'URL
-// Si on est en local, on utilise un fichier. LibSQL utilise le préfixe "file:"
-const url = process.env.DATABASE_URL || 'file:dev.db';
+// Définition du dossier de stockage des données
+// Contrairement à un fichier .db unique, PGLite utilise un dossier.
+const dataDir = process.env.DATABASE_URL || './pgdata';
 
-const client = createClient({ url });
+// Création du client
+const client = new PGlite(dataDir);
 
-export const db = drizzle(client, { 
+// Initialisation de l'ORM
+export const db = drizzle(client, {
   schema,
-  logger: process.env.NODE_ENV === 'development' 
+  logger: process.env.NODE_ENV === 'development',
 });

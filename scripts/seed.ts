@@ -1,21 +1,15 @@
 /**
- * Script de peuplement de la base de données (Seeding) - Version Drizzle Complète.
- *
- * Ce script restaure l'intégralité du jeu de données initial du projet.
- * Il gère les relations complexes (Clés étrangères) en récupérant les IDs
- * générés étape par étape via `.returning()`.
- *
- * Exécuter via : npm run db:seed
+ * Script de peuplement (Seeding) - Version PGLite.
  */
-
 import 'dotenv/config';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '../src/shared/db-schema.js';
 
-// Initialisation connexion
-const sqlite = new Database(process.env.DATABASE_URL?.replace('file:', '') || 'dev.db');
-const db = drizzle(sqlite, { schema });
+// Connexion dédiée au script
+const dataDir = process.env.DATABASE_URL || './pgdata';
+const client = new PGlite(dataDir);
+const db = drizzle(client, { schema });
 
 async function main() {
   console.log('🌱 Démarrage du peuplement complet...');
@@ -210,10 +204,5 @@ async function main() {
 }
 
 main()
-  .catch((e) => {
-    console.error('❌ Erreur lors du peuplement de la base :', e);
-    process.exit(1);
-  })
-  .finally(() => {
-    sqlite.close();
-  });
+  .catch(console.error)
+  .finally(() => process.exit(0));

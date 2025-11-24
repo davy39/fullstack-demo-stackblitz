@@ -34,9 +34,9 @@
   "author": "Avi Maiti",
   "license": "ISC",
   "dependencies": {
+    "@electric-sql/pglite": "^0.3.2",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
-    "@libsql/client": "^0.15.15",
     "@mui/icons-material": "^7.3.5",
     "@mui/material": "^7.3.5",
     "axios": "^1.13.2",
