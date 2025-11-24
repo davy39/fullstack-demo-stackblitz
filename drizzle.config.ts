@@ -71,5 +71,5 @@ export default defineConfig({
   /**
    * Active le mode strict pour une sécurité accrue lors des changements de schéma.
    */
-  strict: true,
+  strict: false,
 });

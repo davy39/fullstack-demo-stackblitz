@@ -5,7 +5,7 @@
   "main": "src/server/index.js",
   "type": "module",
   "scripts": {
-    "dev": "npm run db:setup && npm run db:seed && npm run serve",
+    "dev": "npm run db:push && npm run db:seed && npm run serve",
     "serve": "concurrently \"npm run server\" \"npm run client\"",
     "build": "tsc -b && vite build",
     "start": "npm run build && tsx src/server/index.ts",
