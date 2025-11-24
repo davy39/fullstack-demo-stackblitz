@@ -7,28 +7,17 @@
  * Chemin : src/server/db/client.ts
  */
 import 'dotenv/config';
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { drizzle } from 'drizzle-orm/libsql'; // <-- Changement ici
+import { createClient } from '@libsql/client'; // <-- Changement ici
 import * as schema from '../../shared/db-schema.js';
 
-interface GlobalDrizzle {
-  conn: Database.Database | undefined;
-}
+// Configuration de l'URL
+// Si on est en local, on utilise un fichier. LibSQL utilise le préfixe "file:"
+const url = process.env.DATABASE_URL || 'file:dev.db';
 
-const globalForDb = globalThis as unknown as GlobalDrizzle;
+const client = createClient({ url });
 
-const createConnection = () => {
-  const url = process.env.DATABASE_URL?.replace('file:', '') || 'dev.db';
-  return new Database(url, { fileMustExist: false });
-};
-
-const sqlite = globalForDb.conn ?? createConnection();
-
-export const db = drizzle(sqlite, {
+export const db = drizzle(client, { 
   schema,
-  logger: process.env.NODE_ENV === 'development',
+  logger: process.env.NODE_ENV === 'development' 
 });
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForDb.conn = sqlite;
-}
