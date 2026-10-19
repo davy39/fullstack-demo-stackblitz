@@ -8,5 +8,6 @@ node_modules/
 
 # Build outputs & caches
 dist/
+dist-server/
 *.tsbuildinfo
 
