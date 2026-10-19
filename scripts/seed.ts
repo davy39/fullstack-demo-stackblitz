@@ -5,7 +5,6 @@ import 'dotenv/config';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '../src/shared/db-schema.js';
-import { initDb } from '../src/server/db/client.js';
 
 // Connexion dédiée au script
 const dataDir = process.env.DATABASE_URL || './pgdata';
@@ -14,7 +13,56 @@ const db = drizzle(client, { schema });
 
 async function main() {
   console.log('🌱 Démarrage du peuplement complet...');
-  await initDb();
+  await client.waitReady;
+
+  // Création des tables si nécessaire directement sur le client de seed
+  await client.exec(`
+    CREATE TABLE IF NOT EXISTS "contacts" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "first_name" text NOT NULL,
+      "last_name" text NOT NULL,
+      "email" text NOT NULL,
+      "phone" text,
+      "company" text,
+      "notes" text,
+      "created_at" timestamp DEFAULT now() NOT NULL,
+      "updated_at" timestamp DEFAULT now() NOT NULL,
+      CONSTRAINT "contacts_email_unique" UNIQUE("email")
+    );
+
+    CREATE TABLE IF NOT EXISTS "projects" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "name" text NOT NULL,
+      "description" text,
+      "status" text DEFAULT 'active' NOT NULL,
+      "start_date" timestamp DEFAULT now() NOT NULL,
+      "end_date" timestamp,
+      "created_at" timestamp DEFAULT now() NOT NULL,
+      "updated_at" timestamp DEFAULT now() NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS "project_members" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "role" text DEFAULT 'member' NOT NULL,
+      "joined_at" timestamp DEFAULT now() NOT NULL,
+      "contact_id" integer NOT NULL REFERENCES "contacts"("id") ON DELETE cascade,
+      "project_id" integer NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
+      CONSTRAINT "project_members_unq" UNIQUE("contact_id","project_id")
+    );
+
+    CREATE TABLE IF NOT EXISTS "tasks" (
+      "id" serial PRIMARY KEY NOT NULL,
+      "title" text NOT NULL,
+      "description" text,
+      "status" text DEFAULT 'TODO' NOT NULL,
+      "priority" text DEFAULT 'MEDIUM' NOT NULL,
+      "due_date" timestamp,
+      "assignee_id" integer REFERENCES "contacts"("id") ON DELETE set null,
+      "project_id" integer REFERENCES "projects"("id") ON DELETE cascade,
+      "created_at" timestamp DEFAULT now() NOT NULL,
+      "updated_at" timestamp DEFAULT now() NOT NULL
+    );
+  `);
 
   // 1. Nettoyage (Ordre inverse des dépendances)
   console.log('🧹 Nettoyage des tables existantes...');
@@ -203,6 +251,7 @@ async function main() {
   console.log(`👉 ${contacts.length} contacts créés`);
   console.log(`👉 ${projects.length} projets créés`);
   console.log(`👉 7 tâches créées`);
+  await client.close();
 }
 
 main()
