@@ -10,9 +10,8 @@ export default defineConfig({
   driver: 'pglite',
 
   dbCredentials: {
-    // PGLite stocke les données dans un dossier.
-    // Ici, on utilise le dossier './pgdata' à la racine.
-    url: process.env.DATABASE_URL || './pgdata',
+    // PGLite in-memory pour WebContainer/StackBlitz
+    url: process.env.DATABASE_URL || 'memory://',
   },
 
   verbose: true,

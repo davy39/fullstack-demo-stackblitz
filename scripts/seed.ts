@@ -7,8 +7,10 @@ import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '../src/shared/db-schema.js';
 
 // Connexion dédiée au script
-const dataDir = process.env.DATABASE_URL || './pgdata';
-const client = new PGlite(dataDir);
+const dataDir = process.env.DATABASE_URL && process.env.DATABASE_URL !== './pgdata' && process.env.DATABASE_URL !== 'memory://'
+  ? process.env.DATABASE_URL
+  : undefined;
+const client = dataDir ? new PGlite(dataDir) : new PGlite();
 const db = drizzle(client, { schema });
 
 async function main() {

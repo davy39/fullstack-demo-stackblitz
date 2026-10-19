@@ -11,14 +11,16 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '../../shared/db-schema.js';
 
-// Définition du dossier de stockage des données
-// Contrairement à un fichier .db unique, PGLite utilise un dossier.
-// Note : Si DATABASE_URL n'est pas spécifié ou vaut './pgdata', on s'assure que le dossier existe
-const dataDir = process.env.DATABASE_URL || './pgdata';
+// Définition du stockage des données
+// Sous WebContainer (StackBlitz), l'écriture synchrone de PGLite sur le filesystem VFS './pgdata' se bloque.
+// Si DATABASE_URL n'est pas fourni ou vaut './pgdata', on bascule sur PGlite in-memory (ou 'memory://')
+const isStackBlitz = Boolean(process.env.STACKBLITZ || process.env.SHELL?.includes('webcontainer') || process.env.DATABASE_URL === 'memory://');
+const dataDir = process.env.DATABASE_URL && process.env.DATABASE_URL !== './pgdata'
+  ? process.env.DATABASE_URL
+  : undefined; // undefined = in-memory par défaut pour PGlite
 
 // Création du client PGlite
-// En environnement persistant, dataDir pointe vers ./pgdata
-export const client = new PGlite(dataDir);
+export const client = dataDir ? new PGlite(dataDir) : new PGlite();
 
 export const seedDb = async () => {
   try {
