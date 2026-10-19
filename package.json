@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "npm run db:push && npm run db:seed && npm run serve",
     "dev:serve": "npm run serve",
-    "serve": "concurrently \"npm run server\" \"npm run client\"",
+    "serve": "concurrently -k \"npm run server\" \"npm run client\"",
     "build": "tsc -b && vite build",
     "start": "npm run build && tsx src/server/index.ts",
     "server": "tsx watch --tsconfig src/server/tsconfig.json src/server/index.ts",

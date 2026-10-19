@@ -35,11 +35,18 @@ export default defineConfig({
   },
   server: {
     port: 3001,
+    host: '0.0.0.0',
     open: true,
     strictPort: true,
     proxy: {
-      '/api': `http://localhost:${process.env.PORT}`,
-      '/auth': `http://localhost:${process.env.PORT}`,
+      '/api': {
+        target: `http://127.0.0.1:${process.env.PORT || 8080}`,
+        changeOrigin: true,
+      },
+      '/auth': {
+        target: `http://127.0.0.1:${process.env.PORT || 8080}`,
+        changeOrigin: true,
+      },
     },
   },
   resolve: {

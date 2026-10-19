@@ -104,7 +104,7 @@ const httpServer = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
 
-httpServer.listen(PORT, () => {
+httpServer.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`
   🚀 Server is running!
   🔉 Listening on port ${PORT}
