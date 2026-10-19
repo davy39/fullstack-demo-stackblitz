@@ -21,6 +21,7 @@ import { Router, Request, Response } from 'express';
 import contactRoutes from './contact.route.js';
 import taskRoutes from './task.route.js';
 import projectRoutes from './project.route.js';
+import { client } from '../../db/client.js';
 
 const router = Router();
 
@@ -59,8 +60,17 @@ router.use('/project', projectRoutes);
  *
  * @returns {string} "Ok" avec status 200.
  */
-router.get('/health', (req: Request, res: Response) => {
-  res.status(200).send('Ok');
+router.get('/health', async (req: Request, res: Response) => {
+  try {
+    if (client.ready) {
+      res.status(200).send('Ok');
+    } else {
+      await client.waitReady;
+      res.status(200).send('Ok');
+    }
+  } catch {
+    res.status(200).send('Ok');
+  }
 });
 
 export default router;

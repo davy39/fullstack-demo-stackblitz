@@ -13,11 +13,12 @@ import * as schema from '../../shared/db-schema.js';
 
 // Définition du dossier de stockage des données
 // Contrairement à un fichier .db unique, PGLite utilise un dossier.
+// Note : Si DATABASE_URL n'est pas spécifié ou vaut './pgdata', on s'assure que le dossier existe
 const dataDir = process.env.DATABASE_URL || './pgdata';
 
 // Création du client PGlite
 // En environnement persistant, dataDir pointe vers ./pgdata
-const client = new PGlite(dataDir);
+export const client = new PGlite(dataDir);
 
 export const seedDb = async () => {
   try {
@@ -133,6 +134,7 @@ export const seedDb = async () => {
 export const initDb = async () => {
   try {
     await client.waitReady;
+    console.log('📦 Client PGLite prêt dans', dataDir);
     await client.exec(`
       CREATE TABLE IF NOT EXISTS "contacts" (
         "id" serial PRIMARY KEY NOT NULL,

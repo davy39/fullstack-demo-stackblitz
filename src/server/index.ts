@@ -105,12 +105,21 @@ const httpServer = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
 
-httpServer.listen(Number(PORT), '0.0.0.0', async () => {
-  await initDb();
-  await seedDb();
+httpServer.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`
   🚀 Server is running!
   🔉 Listening on port ${PORT}
   🌍 Environment: ${process.env.NODE_ENV || 'development'}
   `);
+  // L'initialisation se fait en tâche de fond pour que le port écoute immédiatement
+  (async () => {
+    try {
+      console.log('🔄 Initialisation de la base PGLite...');
+      await initDb();
+      await seedDb();
+      console.log('✅ Base PGLite prête !');
+    } catch (e) {
+      console.error('❌ Erreur lors de l’initialisation de PGLite:', e);
+    }
+  })();
 });

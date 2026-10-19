@@ -52,7 +52,8 @@ const Home = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
 
   useEffect(() => {
-    const initDashboard = async () => {
+    let isMounted = true;
+    const initDashboard = async (retryCount = 0) => {
       try {
         // 1. Health Check
         await axios.get('/api/v1/health');
@@ -64,20 +65,33 @@ const Home = () => {
           axios.get<ApiResponse<Project[]>>('/api/v1/project/list'),
         ]);
 
-        setStats({
-          contacts: contactsRes.data.data?.length || 0,
-          tasks: tasksRes.data.data?.length || 0,
-          projects: projectsRes.data.data?.length || 0,
-        });
+        if (isMounted) {
+          setStats({
+            contacts: contactsRes.data.data?.length || 0,
+            tasks: tasksRes.data.data?.length || 0,
+            projects: projectsRes.data.data?.length || 0,
+          });
 
-        setDbStatus('connected');
+          setDbStatus('connected');
+        }
       } catch (error) {
-        console.error('❌ Erreur connexion PGLite:', error);
-        setDbStatus('error');
+        // En environnement WebContainer / StackBlitz, le serveur backend met parfois quelques secondes
+        // à démarrer et initialiser PGLite. On réessaie quelques fois avant d'afficher l'erreur.
+        if (retryCount < 5) {
+          setTimeout(() => {
+            if (isMounted) initDashboard(retryCount + 1);
+          }, 1500);
+        } else {
+          console.error('❌ Erreur connexion PGLite:', error);
+          if (isMounted) setDbStatus('error');
+        }
       }
     };
 
     initDashboard();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   if (dbStatus === 'error') {
