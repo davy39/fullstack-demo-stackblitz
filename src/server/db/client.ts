@@ -15,8 +15,119 @@ import * as schema from '../../shared/db-schema.js';
 // Contrairement à un fichier .db unique, PGLite utilise un dossier.
 const dataDir = process.env.DATABASE_URL || './pgdata';
 
-// Création du client
+// Création du client PGlite
+// En environnement persistant, dataDir pointe vers ./pgdata
 const client = new PGlite(dataDir);
+
+export const seedDb = async () => {
+  try {
+    const existing = await db.select().from(schema.contacts).limit(1);
+    if (existing.length === 0) {
+      console.log('🌱 Base vide détectée : peuplement initial...');
+      const contacts = await db.insert(schema.contacts).values([
+        {
+          firstName: 'Jean',
+          lastName: 'Dupont',
+          email: 'jean.dupont@example.com',
+          phone: '06 01 02 03 04',
+          company: 'Tech Corp',
+          notes: "Développeur Lead avec 10 ans d'expérience en React.",
+        },
+        {
+          firstName: 'Marie',
+          lastName: 'Martin',
+          email: 'marie.martin@example.com',
+          phone: '06 99 88 77 66',
+          company: 'Design Studio',
+          notes: 'Experte UI/UX spécialisée dans les interfaces mobiles.',
+        },
+        {
+          firstName: 'Pierre',
+          lastName: 'Durand',
+          email: 'pierre.durand@example.com',
+          phone: '06 12 34 56 78',
+          company: 'Marketing Inc',
+          notes: 'Chef de projet certifié Scrum Master.',
+        },
+        {
+          firstName: 'Sophie',
+          lastName: 'Dubois',
+          email: 'sophie.dubois@example.com',
+          phone: '06 11 22 33 44',
+          company: 'Data Analytics Co',
+          notes: 'Data scientist, experte en Machine Learning et Python.',
+        },
+      ]).returning();
+
+      const projects = await db.insert(schema.projects).values([
+        {
+          name: 'Plateforme E-commerce',
+          description: 'Refonte complète du site marchand avec React 19 et Node.js.',
+          status: 'active',
+          startDate: new Date('2024-01-15'),
+          endDate: new Date('2024-06-30'),
+        },
+        {
+          name: 'Application Mobile',
+          description: 'App native pour la gestion de tâches (iOS/Android).',
+          status: 'active',
+          startDate: new Date('2024-02-01'),
+          endDate: new Date('2024-08-15'),
+        },
+        {
+          name: 'Dashboard Analytique',
+          description: 'Tableau de bord BI temps réel pour la direction.',
+          status: 'planning',
+          startDate: new Date('2024-03-01'),
+          endDate: new Date('2024-09-30'),
+        },
+      ]).returning();
+
+      await db.insert(schema.projectMembers).values([
+        { contactId: contacts[0].id, projectId: projects[0].id, role: 'lead_dev' },
+        { contactId: contacts[1].id, projectId: projects[0].id, role: 'designer' },
+        { contactId: contacts[2].id, projectId: projects[0].id, role: 'chef_de_projet' },
+        { contactId: contacts[1].id, projectId: projects[1].id, role: 'designer' },
+        { contactId: contacts[0].id, projectId: projects[1].id, role: 'developer' },
+        { contactId: contacts[3].id, projectId: projects[2].id, role: 'data_scientist' },
+        { contactId: contacts[2].id, projectId: projects[2].id, role: 'chef_de_projet' },
+      ]);
+
+      await db.insert(schema.tasks).values([
+        {
+          title: 'Setup initial du projet',
+          description: 'Initialiser le repository Git, configurer Vite et Express avec TypeScript.',
+          status: 'DONE',
+          priority: 'HIGH',
+          assigneeId: contacts[0].id,
+          projectId: projects[0].id,
+          dueDate: new Date('2024-01-20'),
+        },
+        {
+          title: 'Maquettes UI Mobile',
+          description: 'Concevoir les wireframes et les parcours utilisateurs sur Figma.',
+          status: 'IN_PROGRESS',
+          priority: 'MEDIUM',
+          assigneeId: contacts[1].id,
+          projectId: projects[0].id,
+          dueDate: new Date('2024-02-15'),
+        },
+        {
+          title: 'Architecture API & Schéma BDD',
+          description: 'Définir les modèles Drizzle ORM et les migrations PostgreSQL/PGLite.',
+          status: 'DONE',
+          priority: 'HIGH',
+          assigneeId: contacts[0].id,
+          projectId: projects[0].id,
+          dueDate: new Date('2024-01-25'),
+        },
+      ]);
+      console.log('✨ Base de données initialisée et peuplée avec succès !');
+    }
+  } catch (e) {
+    console.warn('⚠️ Seeding ignoré ou déjà effectué:', e);
+  }
+};
 
 // Initialisation automatique du schéma PGLite si les tables n'existent pas
 export const initDb = async () => {

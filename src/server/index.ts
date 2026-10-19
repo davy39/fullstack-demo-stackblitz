@@ -19,7 +19,7 @@ import cors from 'cors';
 import routes from './routes/v1/index.js';
 import { securityMiddleware, requestLogger } from './middleware/security.js';
 import { globalErrorHandler } from './middleware/error.js';
-import { initDb } from './db/client.js';
+import { initDb, seedDb } from './db/client.js';
 
 /**
  * Instance de l'application Express.
@@ -107,6 +107,7 @@ const PORT = process.env.PORT || 3000;
 
 httpServer.listen(Number(PORT), '0.0.0.0', async () => {
   await initDb();
+  await seedDb();
   console.log(`
   🚀 Server is running!
   🔉 Listening on port ${PORT}
