@@ -1,3 +1,13 @@
 node_modules/
 drizzle/
-pgdata/
+# PGLite local storage
+/pgdata/
+
+# Environment files
+.env
+.env.local
+
+# Build outputs & caches
+dist/
+*.tsbuildinfo
+
