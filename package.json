@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "npm run db:push && npm run db:seed && npm run serve",
+    "dev:auto": "npm run db:seed && npm run serve",
     "dev:serve": "npm run serve",
     "serve": "concurrently -k \"npm run server\" \"npm run client\"",
     "build": "tsc -b && vite build",

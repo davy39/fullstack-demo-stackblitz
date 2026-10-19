@@ -19,6 +19,7 @@ import cors from 'cors';
 import routes from './routes/v1/index.js';
 import { securityMiddleware, requestLogger } from './middleware/security.js';
 import { globalErrorHandler } from './middleware/error.js';
+import { initDb } from './db/client.js';
 
 /**
  * Instance de l'application Express.
@@ -104,7 +105,8 @@ const httpServer = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
 
-httpServer.listen(Number(PORT), '0.0.0.0', () => {
+httpServer.listen(Number(PORT), '0.0.0.0', async () => {
+  await initDb();
   console.log(`
   🚀 Server is running!
   🔉 Listening on port ${PORT}

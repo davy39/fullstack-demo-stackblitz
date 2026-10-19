@@ -5,6 +5,7 @@ import 'dotenv/config';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '../src/shared/db-schema.js';
+import { initDb } from '../src/server/db/client.js';
 
 // Connexion dédiée au script
 const dataDir = process.env.DATABASE_URL || './pgdata';
@@ -13,6 +14,7 @@ const db = drizzle(client, { schema });
 
 async function main() {
   console.log('🌱 Démarrage du peuplement complet...');
+  await initDb();
 
   // 1. Nettoyage (Ordre inverse des dépendances)
   console.log('🧹 Nettoyage des tables existantes...');

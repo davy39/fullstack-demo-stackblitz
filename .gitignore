@@ -1,5 +1,4 @@
 node_modules/
-drizzle/
 # PGLite local storage
 /pgdata/
 
